@@ -1,0 +1,47 @@
+# Private chat data and generated datasets
+data/
+raw/
+chat_records/
+
+# Models, adapters, and compiled binaries
+models/
+adapters/
+bin/
+llama-server-src/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.exe
+*.dll
+
+# Python environments and caches
+qq-env/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Logs and local runtime artifacts
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.tmp
+*.bak
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local secrets/config overrides
+.env
+.env.*
+*.key
+*.pem
+*.token
