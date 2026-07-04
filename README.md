@@ -1,4 +1,6 @@
-# Qwen-Chat 项目文档
+# Qwen-Chat RX580 项目文档
+
+这是一个围绕 AMD RX580 / RX 590 GME 8GB 显卡、Vulkan 后端和 llama.cpp QLoRA 训练链路搭建的本地聊天 agent 实验项目。项目重点是验证 RX580 级别显卡上运行 Qwen/Qwen2.5 小模型、LoRA/QLoRA 微调、私聊语料清洗、60m 大段切分、agent 并发细分和后续拟人化聊天 agent 数据构造流程。
 
 ## 项目结构
 
