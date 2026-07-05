@@ -45,3 +45,7 @@ Thumbs.db
 *.key
 *.pem
 *.token
+
+# Local private workspace artifacts
+workspace/
+scripts/process_batch.ps1
