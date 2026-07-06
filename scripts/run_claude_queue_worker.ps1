@@ -32,9 +32,7 @@ while ($processed -lt $MaxJobs) {
 
     Move-Item -LiteralPath $job.FullName -Destination $inProgressPath
 
-    $prompt = @"
-你在 Windows 工作区 D:\files\qwen-chat。
-
+$prompt = @"
 只处理这一个 job：
 $inProgressPath
 

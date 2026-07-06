@@ -6,11 +6,12 @@ import os
 import time
 import re
 import traceback
+import argparse
 
-LLAMA = r"D:\files\qwen-chat\bin\llama-cli.exe"
-MODEL = r"D:\files\qwen-chat\models\qwen2.5-0.5b-instruct-q4_k_m.gguf"
-HOST = "0.0.0.0"
-PORT = 8080
+LLAMA = os.environ.get("LLAMA_CLI", "llama-cli")
+MODEL = os.environ.get("QWEN_MODEL", "models/qwen2.5-0.5b-instruct-q4_k_m.gguf")
+HOST = os.environ.get("QWEN_API_HOST", "127.0.0.1")
+PORT = int(os.environ.get("QWEN_API_PORT", "8080"))
 
 def generate(messages, max_tokens=200, temp=0.7):
     prompt = ""
@@ -103,6 +104,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"Qwen API running. POST / with JSON body.")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Minimal OpenAI-like wrapper for llama-cli.")
+    parser.add_argument("--llama", default=LLAMA)
+    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--host", default=HOST)
+    parser.add_argument("--port", type=int, default=PORT)
+    args = parser.parse_args()
+    LLAMA = args.llama
+    MODEL = args.model
+    HOST = args.host
+    PORT = args.port
     print(f"API at http://{HOST}:{PORT}")
     print(f"POST JSON with messages array to /")
     http.server.HTTPServer((HOST, PORT), Handler).serve_forever()

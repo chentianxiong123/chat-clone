@@ -6,12 +6,8 @@ Non-text messages: tag as [image], [voice], [emoji] etc.
 import sqlite3
 import json
 import struct
+import argparse
 from datetime import datetime
-
-DB_PATH = r"C:\Users\a1\Msg3.0.db_0_1783155434.db"
-MY_UIN = os.environ.get("MY_QQ", "<your_qq>")
-FRIEND_UIN = 1026044893
-OUTPUT_FILE = r"D:\files\qwen-chat\chat_records\qq_1026044893_final.jsonl"
 
 MsgText = 1
 MsgFace = 2
@@ -115,11 +111,17 @@ def parse_msg_content(buf):
 
 
 def main():
-    print(f"Connecting to {DB_PATH}...")
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    parser = argparse.ArgumentParser(description="Extract one QQ private chat table to JSONL.")
+    parser.add_argument("--db", required=True, help="Path to decrypted Msg3.0.db.")
+    parser.add_argument("--buddy-uin", required=True, help="QQ buddy UIN/table suffix.")
+    parser.add_argument("--output", required=True, help="Output JSONL path.")
+    args = parser.parse_args()
+
+    print(f"Connecting to {args.db}...")
+    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     cur = conn.cursor()
     
-    table = "buddy_1026044893"
+    table = f"buddy_{args.buddy_uin}"
     print(f"Processing {table}...")
     
     cur.execute(f"SELECT Time, SenderUin, MsgContent FROM {table}")
@@ -128,7 +130,7 @@ def main():
     friend_count = 0
     type_stats = {}
     
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as fout:
+    with open(args.output, 'w', encoding='utf-8') as fout:
         for ts, sender, content in cur.fetchall():
             if not content:
                 continue
@@ -165,18 +167,18 @@ def main():
             }
             fout.write(json.dumps(record, ensure_ascii=False) + '\n')
             
-            if sender == FRIEND_UIN:
+            if str(sender) == str(args.buddy_uin):
                 friend_count += 1
     
     conn.close()
     
     print(f"\n=== DONE ===")
     print(f"Total: {count}")
-    print(f"Friend (1026044893): {friend_count}")
+    print(f"Friend: {friend_count}")
     print(f"Type breakdown:")
     for t, c in sorted(type_stats.items(), key=lambda x: -x[1]):
         print(f"  {t}: {c}")
-    print(f"Output: {OUTPUT_FILE}")
+    print(f"Output: {args.output}")
 
 
 if __name__ == '__main__':

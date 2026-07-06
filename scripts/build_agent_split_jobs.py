@@ -18,7 +18,7 @@ DEFAULT_SOURCES = [
 
 PROMPT_TEXT = """# Agent 大段细分任务说明
 
-你会收到一条 JSON job。它是一段按 60 分钟硬切出来的大容器聊天记录。
+你会收到一条 JSON job。它是一段按 60 分钟硬切出来的大容器消息记录。
 
 目标：只判断这段内部哪些相邻消息之间适合切开，用于后续生成训练小段。
 
@@ -336,7 +336,7 @@ def main():
     parser.add_argument(
         "--prompt-output",
         type=Path,
-        default=Path(r"C:\Users\a1\Desktop\agent-large-segment-split-prompt.md"),
+        default=Path("workspace/docs_exports/agent-large-segment-split-prompt.md"),
     )
     args = parser.parse_args()
 

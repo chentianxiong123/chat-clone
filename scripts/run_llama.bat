@@ -1,2 +1,0 @@
-@echo off
-"D:\files\qwen-chat\bin\llama-cli.exe" -m "D:\files\qwen-chat\models\qwen2.5-0.5b-instruct-q4_k_m.gguf" --lora "D:\files\qwen-chat\adapters\adapter.gguf" -ngl 99 -mg 1 --temp 0.7 -n 100 --no-display-prompt -f "%1"
