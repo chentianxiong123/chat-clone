@@ -7,7 +7,7 @@ from pathlib import Path
 
 DEFAULT_INPUT = Path("data/agent_split_jobs/large_segments_60m_api_allowed.jsonl")
 DEFAULT_OUTPUT_ROOT = Path("data/agent_workspaces/api_allowed_60m")
-DEFAULT_PROMPT = Path(r"C:\Users\a1\Desktop\agent-large-segment-split-prompt.md")
+DEFAULT_PROMPT = Path("workspace/docs_exports/agent-large-segment-split-prompt.md")
 
 
 def iter_jsonl(path):

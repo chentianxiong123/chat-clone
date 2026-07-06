@@ -16,6 +16,7 @@ llama-server-src/
 *.onnx
 *.exe
 *.dll
+*.zip
 
 # Python environments and caches
 qq-env/
