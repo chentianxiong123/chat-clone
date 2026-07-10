@@ -1,14 +1,28 @@
-# Qwen-Chat RX580
+# qwen-chat-rx580-lora-persona-agent
 
-Local tooling for experimenting with chat-record cleaning, agent-assisted segmentation, lightweight SFT dataset construction, and RAG preparation on AMD RX580/RX590-class hardware.
+Local tooling for building a Qwen-based persona agent on AMD RX580/RX590-class hardware, including chat-record cleaning, agent-assisted segmentation, lightweight LoRA/SFT dataset construction, and RAG/embedding preparation.
 
 The repository is intended to contain only release-safe code and workflow documentation. Raw chat exports, generated datasets, model weights, LoRA adapters, compiled binaries, local queues, and private workspaces are ignored by Git.
+
+## Repository Role
+
+This is the downstream persona-agent and data workflow repository.
+
+```text
+ggerganov/llama.cpp
+        ↓ upstream sync
+chentianxiong123/llama.cpp-lora-embed
+        ↓ runtime dependency
+chentianxiong123/qwen-chat-rx580-lora-persona-agent
+```
+
+Use `llama.cpp-lora-embed` for the local runtime: Qwen inference, LoRA loading, Q-LoRA experiments, and OpenAI-compatible embedding service. Use this repository for private chat processing, segment review, retrieval documents, SFT/RAG dataset construction, and persona-agent workflow scripts.
 
 ## What Is Included
 
 - `scripts/`: data extraction helpers, segmentation builders, queue utilities, SFT dataset builders, and normalization scripts.
 - `config/` and `configs/`: review policy and training configuration templates.
-- `docs/`: project workflow notes.
+- `docs/`: project workflow notes, including embedding production notes.
 - `.gitignore`: protects private data, model files, local environments, compiled binaries, and generated outputs.
 
 ## Private Paths
@@ -33,15 +47,17 @@ Keep these local only:
 4. Build resumable agent jobs for boundary decisions.
 5. Merge agent decisions into final segments.
 6. Build short SFT datasets or RAG ingestion inputs from the approved segments.
+7. Run embedding production as explicit CLI stages: retrieval docs, embeddings, index, query test.
 
 The current direction favors RAG and retrieval-augmented behavior over relying on a small LoRA model to learn long-range personality logic.
+See `docs/embedding_production.md` for the intended embedding production shape.
 
 ## Hardware Target
 
 The scripts and notes are designed around low-cost local experimentation with:
 
 - AMD RX580 / RX590-class 8GB GPUs
-- Vulkan llama.cpp builds
+- Vulkan builds from `llama.cpp-lora-embed`
 - Qwen/Qwen2.5 small models
 - Qwen embedding models for local retrieval
 
