@@ -33,6 +33,16 @@ __pycache__/
 *.db
 *.tmp
 *.bak
+*.duckdb
+*.faiss
+*.npy
+*.npz
+*.arrow
+*.parquet
+*_vec.json
+api_vec.json
+local_vec.json
+model_inventory.md
 
 # OS/editor noise
 .DS_Store
