@@ -5,13 +5,15 @@ from pathlib import Path
 
 
 DEFAULT_SESSION_SOURCES = [
-    Path("workspace/api_segments/sessions_wechat_60m_api_allowed.jsonl"),
-    Path("workspace/api_segments/sessions_qq_60m_api_allowed.jsonl"),
+    Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_wechat_60m_api_allowed.jsonl"),
+    Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_qq_60m_api_allowed.jsonl"),
 ]
-DEFAULT_JOBS = Path("workspace/agent_jobs/large_segments_60m_api_allowed.jsonl")
-DEFAULT_DECISIONS = Path("workspace/agent_decisions/large_segments_60m_api_allowed.decisions.normalized.jsonl")
-DEFAULT_OUTPUT = Path("workspace/final_segments/final_segments_v1_allowed.jsonl")
-DEFAULT_SUMMARY = Path("workspace/final_segments/final_segments_v1_allowed.summary.json")
+DEFAULT_JOBS = Path("workspace/03_agent_split_jobs/agent_jobs/large_segments_60m_api_allowed.jsonl")
+DEFAULT_DECISIONS = Path(
+    "workspace/05_agent_decisions/agent_decisions/large_segments_60m_api_allowed.decisions.normalized.jsonl"
+)
+DEFAULT_OUTPUT = Path("workspace/06_final_segments/final_segments/final_segments_v1_allowed.jsonl")
+DEFAULT_SUMMARY = Path("workspace/06_final_segments/final_segments/final_segments_v1_allowed.summary.json")
 
 
 def iter_jsonl(path):

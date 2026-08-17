@@ -46,7 +46,7 @@ def main():
     parser.add_argument("--input", type=Path, nargs="+", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--target-sender", required=True)
-    parser.add_argument("--prompt", default="T:")
+    parser.add_argument("--prompt", default="assistant:")
     parser.add_argument("--min-chars", type=int, default=1)
     parser.add_argument("--max-chars", type=int, default=20)
     parser.add_argument("--response-cap", type=int, default=30)

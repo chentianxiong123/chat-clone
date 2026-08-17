@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-DEFAULT_QUEUE_ROOT = Path("data/agent_queues/api_allowed_60m")
+DEFAULT_QUEUE_ROOT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m")
 
 
 def check_duplicates(queue_root):

@@ -249,9 +249,21 @@ def main():
     parser = argparse.ArgumentParser(description="Create a trial bundle with three adjacent routed sessions.")
     parser.add_argument("--platform", default="wechat")
     parser.add_argument("--threshold-min", type=int, default=30)
-    parser.add_argument("--input-dir", type=Path, default=Path("data/api_segments"))
-    parser.add_argument("--output-md", type=Path, default=Path("workspace/docs_exports/api-adjacent-segment-trial.md"))
-    parser.add_argument("--output-json", type=Path, default=Path("workspace/docs_exports/api-adjacent-segment-trial.json"))
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=Path("workspace/02_policy_route_sensitive_split/api_segments"),
+    )
+    parser.add_argument(
+        "--output-md",
+        type=Path,
+        default=Path("workspace/99_archive/trial_exports/api-adjacent-segment-trial.md"),
+    )
+    parser.add_argument(
+        "--output-json",
+        type=Path,
+        default=Path("workspace/99_archive/trial_exports/api-adjacent-segment-trial.json"),
+    )
     parser.add_argument("--window", type=int, default=12)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--allow-manual-review", action="store_true")

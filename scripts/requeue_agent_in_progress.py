@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 
-DEFAULT_QUEUE_ROOT = Path("data/agent_queues/api_allowed_60m")
+DEFAULT_QUEUE_ROOT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m")
 
 
 def requeue(queue_root):

@@ -7,11 +7,11 @@ from collections import Counter
 from pathlib import Path
 
 
-DEFAULT_INPUT = Path("workspace/final_segments/final_segments_v1_allowed.jsonl")
-DEFAULT_OUTPUT = Path("workspace/train_sets/train_sft_v1_allowed.jsonl")
-DEFAULT_SUMMARY = Path("workspace/train_sets/train_sft_v1_allowed.summary.json")
+DEFAULT_INPUT = Path("workspace/06_final_segments/final_segments/final_segments_v1_allowed.jsonl")
+DEFAULT_OUTPUT = Path("workspace/08_sft_datasets/train_sets/train_sft_v1_allowed.jsonl")
+DEFAULT_SUMMARY = Path("workspace/08_sft_datasets/train_sets/train_sft_v1_allowed.summary.json")
 
-SYSTEM_PROMPT = "根据聊天上下文，只输出T的下一条消息。"
+SYSTEM_PROMPT = "根据聊天上下文，只输出 assistant 的下一条消息。"
 
 
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -48,25 +48,13 @@ def format_non_text(message):
     return f"[{typ}]"
 
 
-def speaker_label(sender, target_sender, other_labels, name_mode):
+def speaker_label(sender, target_sender):
     sender = str(sender)
-    if name_mode == "short":
-        if sender == target_sender:
-            return "T"
-        if sender not in other_labels:
-            other_labels[sender] = "U" if not other_labels else f"U{len(other_labels) + 1}"
-        return other_labels[sender]
-    if name_mode == "original":
-        return sender
-    if sender == target_sender:
-        return "目标人物"
-    if sender not in other_labels:
-        other_labels[sender] = "对方" if not other_labels else f"对方{len(other_labels) + 1}"
-    return other_labels[sender]
+    return "assistant" if sender == target_sender else "user"
 
 
-def format_message_line(message, target_sender, other_labels, name_mode, include_time):
-    label = speaker_label(message.get("sender", ""), target_sender, other_labels, name_mode)
+def format_message_line(message, target_sender, include_time):
+    label = speaker_label(message.get("sender", ""), target_sender)
     content = clean_text(message.get("text", ""))
     if str(message.get("type", "")) != "text":
         content = format_non_text(message)
@@ -75,14 +63,11 @@ def format_message_line(message, target_sender, other_labels, name_mode, include
     return f"{label}: {content}"
 
 
-def build_training_row(context_messages, target_message, target_sender, name_mode, include_time, system_prompt):
-    other_labels = {}
+def build_training_row(context_messages, target_message, target_sender, include_time, system_prompt):
     context_lines = [
         format_message_line(
             message=message,
             target_sender=target_sender,
-            other_labels=other_labels,
-            name_mode=name_mode,
             include_time=include_time,
         )
         for message in context_messages
@@ -117,7 +102,6 @@ def build_sft(
     context_messages,
     min_context_messages,
     max_target_chars,
-    name_mode,
     include_time,
     system_prompt,
     sample_rate,
@@ -165,7 +149,6 @@ def build_sft(
                     context_messages=context,
                     target_message=message,
                     target_sender=target_sender,
-                    name_mode=name_mode,
                     include_time=include_time,
                     system_prompt=system_prompt,
                 )
@@ -194,7 +177,7 @@ def build_sft(
         "context_messages": context_messages,
         "min_context_messages": min_context_messages,
         "max_target_chars": max_target_chars,
-        "name_mode": name_mode,
+        "speaker_labels": "user/assistant",
         "include_time": include_time,
         "sample_rate": sample_rate,
         "seed": seed,
@@ -236,7 +219,6 @@ def main():
     parser.add_argument("--context-messages", type=int, default=12)
     parser.add_argument("--min-context-messages", type=int, default=4)
     parser.add_argument("--max-target-chars", type=int, default=1000, help="Use 0 to disable.")
-    parser.add_argument("--name-mode", choices=["short", "role", "original"], default="short")
     parser.add_argument("--no-time", action="store_true")
     parser.add_argument("--system-prompt", default=SYSTEM_PROMPT)
     parser.add_argument("--sample-rate", type=float, default=1.0)
@@ -259,7 +241,6 @@ def main():
         context_messages=args.context_messages,
         min_context_messages=args.min_context_messages,
         max_target_chars=args.max_target_chars,
-        name_mode=args.name_mode,
         include_time=not args.no_time,
         system_prompt=args.system_prompt,
         sample_rate=args.sample_rate,

@@ -143,8 +143,8 @@ def write_markdown(path, samples):
 def main():
     parser = argparse.ArgumentParser(description="Create a natural transcript bundle for boundary API trials.")
     parser.add_argument("--input", type=Path, default=Path("data/boundary_samples_api_allowed.jsonl"))
-    parser.add_argument("--output-md", type=Path, default=Path("workspace/docs_exports/api-boundary-trial-bundle.md"))
-    parser.add_argument("--output-json", type=Path, default=Path("workspace/docs_exports/api-boundary-trial-bundle.json"))
+    parser.add_argument("--output-md", type=Path, default=Path("workspace/99_archive/trial_exports/api-boundary-trial-bundle.md"))
+    parser.add_argument("--output-json", type=Path, default=Path("workspace/99_archive/trial_exports/api-boundary-trial-bundle.json"))
     parser.add_argument("--bucket", action="append", default=[])
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()

@@ -8,8 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-DEFAULT_OUTPUT_DIR = Path("workspace/train_sets/style_stream_short_v1")
-DEFAULT_SYSTEM_PROMPT = "按真实聊天时间流，只输出T的下一条短消息。"
+DEFAULT_OUTPUT_DIR = Path("workspace/08_sft_datasets/train_sets/style_stream_short_v1")
+DEFAULT_SYSTEM_PROMPT = "按真实聊天时间流，只输出 assistant 的下一条短消息。"
 
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
@@ -67,13 +67,13 @@ def is_bad_training_text(text, drop_urls, drop_codeish):
 
 
 def format_context_line(message, target_sender):
-    label = "T" if message["sender"] == target_sender else "U"
+    label = "assistant" if message["sender"] == target_sender else "user"
     return f"{label}: {message['text']}"
 
 
 def build_prompt(context, target_sender):
     lines = [format_context_line(message, target_sender) for message in context]
-    lines.append("T:")
+    lines.append("assistant:")
     return "\n".join(lines)
 
 

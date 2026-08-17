@@ -9,10 +9,26 @@ TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 DEFAULT_SOURCES = [
-    ("wechat", "api_allowed", Path("data/api_segments/sessions_wechat_60m_api_allowed.jsonl")),
-    ("qq", "api_allowed", Path("data/api_segments/sessions_qq_60m_api_allowed.jsonl")),
-    ("wechat", "manual_review", Path("data/api_segments/sessions_wechat_60m_api_blocked.jsonl")),
-    ("qq", "manual_review", Path("data/api_segments/sessions_qq_60m_api_blocked.jsonl")),
+    (
+        "wechat",
+        "api_allowed",
+        Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_wechat_60m_api_allowed.jsonl"),
+    ),
+    (
+        "qq",
+        "api_allowed",
+        Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_qq_60m_api_allowed.jsonl"),
+    ),
+    (
+        "wechat",
+        "manual_review",
+        Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_wechat_60m_api_blocked.jsonl"),
+    ),
+    (
+        "qq",
+        "manual_review",
+        Path("workspace/02_policy_route_sensitive_split/api_segments/sessions_qq_60m_api_blocked.jsonl"),
+    ),
 ]
 
 
@@ -332,11 +348,11 @@ def main():
     parser = argparse.ArgumentParser(description="Build 60m large-segment jobs for agent-based splitting.")
     parser.add_argument("--source", action="append", type=parse_source)
     parser.add_argument("--threshold-min", type=int, default=60)
-    parser.add_argument("--output-dir", type=Path, default=Path("data/agent_split_jobs"))
+    parser.add_argument("--output-dir", type=Path, default=Path("workspace/03_agent_split_jobs/agent_jobs"))
     parser.add_argument(
         "--prompt-output",
         type=Path,
-        default=Path("workspace/docs_exports/agent-large-segment-split-prompt.md"),
+        default=Path("workspace/03_agent_split_jobs/prompts/agent-large-segment-split-prompt.md"),
     )
     args = parser.parse_args()
 

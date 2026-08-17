@@ -116,7 +116,11 @@ def run_worker(queue_root, max_jobs, worker_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Run a resumable Claude queue worker.")
-    parser.add_argument("--queue-root", type=Path, default=Path("data/agent_queues/api_allowed_60m"))
+    parser.add_argument(
+        "--queue-root",
+        type=Path,
+        default=Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m"),
+    )
     parser.add_argument("--max-jobs", type=int, default=20)
     parser.add_argument("--worker-name", default="claude_worker")
     args = parser.parse_args()

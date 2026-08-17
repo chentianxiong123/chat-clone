@@ -57,24 +57,22 @@ def is_bad_text(text):
     return not text or URL_RE.search(text) or CODEISH_RE.search(text)
 
 
-def speaker_label(message, target_sender, label_mode, target_label, other_label):
-    if label_mode == "zh":
-        return target_label if message["sender"] == target_sender else other_label
-    return "T" if message["sender"] == target_sender else "U"
+def speaker_label(message, target_sender):
+    return "assistant" if message["sender"] == target_sender else "user"
 
 
-def format_line(message, target_sender, compact, label_mode, target_label, other_label):
-    label = speaker_label(message, target_sender, label_mode, target_label, other_label)
+def format_line(message, target_sender, compact):
+    label = speaker_label(message, target_sender)
     sep = " " if compact else ": "
     return f"{label}{sep}{message['text']}"
 
 
-def build_prompt(context, target_sender, compact, label_mode, target_label, other_label):
+def build_prompt(context, target_sender, compact):
     lines = [
-        format_line(message, target_sender, compact, label_mode, target_label, other_label)
+        format_line(message, target_sender, compact)
         for message in context
     ]
-    target = target_label if label_mode == "zh" else "T"
+    target = "assistant"
     lines.append(target if compact else f"{target}:")
     return "\n".join(lines)
 
@@ -158,9 +156,6 @@ def build_candidates(
     burst_max_lines,
     burst_max_response_chars,
     compact_prompt,
-    label_mode,
-    target_label,
-    other_label,
 ):
     candidates = []
     stats = Counter()
@@ -182,7 +177,7 @@ def build_candidates(
                 continue
 
             prompt = build_prompt(
-                context, target_sender, compact_prompt, label_mode, target_label, other_label
+                context, target_sender, compact_prompt
             )
             add_candidate(candidates, "single", prompt, message["text"], message["platform"], stats)
 
@@ -210,7 +205,7 @@ def build_candidates(
                 if context and len(response.replace("\n", "")) <= burst_max_response_chars:
                     if max_context_chars <= 0 or sum(len(m["text"]) for m in context) <= max_context_chars:
                         prompt = build_prompt(
-                            context, target_sender, compact_prompt, label_mode, target_label, other_label
+                            context, target_sender, compact_prompt
                         )
                         add_candidate(candidates, "burst", prompt, response, message["platform"], stats)
                     else:
@@ -321,9 +316,6 @@ def main():
     parser.add_argument("--val-ratio", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=20260706)
     parser.add_argument("--compact-prompt", action="store_true")
-    parser.add_argument("--label-mode", choices=["ut", "zh"], default="ut")
-    parser.add_argument("--target-label", default="T")
-    parser.add_argument("--other-label", default="U")
     args = parser.parse_args()
 
     for path in args.input:
@@ -342,9 +334,6 @@ def main():
         burst_max_lines=args.burst_max_lines,
         burst_max_response_chars=args.burst_max_response_chars,
         compact_prompt=args.compact_prompt,
-        label_mode=args.label_mode,
-        target_label=args.target_label,
-        other_label=args.other_label,
     )
     selected, select_stats = weighted_select(
         candidates=candidates,
@@ -374,9 +363,6 @@ def main():
         "val_ratio": args.val_ratio,
         "seed": args.seed,
         "compact_prompt": args.compact_prompt,
-        "label_mode": args.label_mode,
-        "target_label_hash": stable_hash(args.target_label),
-        "other_label_hash": stable_hash(args.other_label),
         "samples_total": len(selected),
         "train_samples": len(train),
         "val_samples": len(val),
