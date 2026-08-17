@@ -6,8 +6,8 @@ from collections import Counter
 from pathlib import Path
 
 
-DEFAULT_INPUT = Path("workspace/train_sets/train_sft_v1_allowed.jsonl")
-DEFAULT_OUTPUT_DIR = Path("workspace/train_sets/final_sft_v1")
+DEFAULT_INPUT = Path("workspace/08_sft_datasets/train_sets/train_sft_v1_allowed.jsonl")
+DEFAULT_OUTPUT_DIR = Path("workspace/08_sft_datasets/train_sets/final_sft_v1")
 DEFAULT_SEED = 20260705
 
 

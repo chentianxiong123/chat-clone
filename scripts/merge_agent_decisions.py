@@ -4,9 +4,9 @@ from collections import Counter
 from pathlib import Path
 
 
-DEFAULT_WORKSPACE_ROOT = Path("data/agent_workspaces/api_allowed_60m")
-DEFAULT_OUTPUT = Path("data/agent_split_jobs/large_segments_60m_api_allowed.decisions.jsonl")
-DEFAULT_SUMMARY = Path("data/agent_split_jobs/large_segments_60m_api_allowed.decisions.summary.json")
+DEFAULT_WORKSPACE_ROOT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m")
+DEFAULT_OUTPUT = Path("workspace/05_agent_decisions/agent_decisions/large_segments_60m_api_allowed.decisions.jsonl")
+DEFAULT_SUMMARY = Path("workspace/05_agent_decisions/agent_decisions/large_segments_60m_api_allowed.decisions.summary.json")
 VALID_DECISIONS = {"cut", "keep", "uncertain"}
 
 
@@ -211,7 +211,9 @@ def main():
     parser.add_argument(
         "--errors",
         type=Path,
-        default=Path("data/agent_split_jobs/large_segments_60m_api_allowed.decisions.errors.jsonl"),
+        default=Path(
+            "workspace/05_agent_decisions/agent_decisions/large_segments_60m_api_allowed.decisions.errors.jsonl"
+        ),
     )
     parser.add_argument("--allow-incomplete", action="store_true")
     args = parser.parse_args()

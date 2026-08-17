@@ -4,9 +4,9 @@ import shutil
 from pathlib import Path
 
 
-DEFAULT_INPUT = Path("data/agent_split_jobs/large_segments_60m_api_allowed.jsonl")
-DEFAULT_OUTPUT_ROOT = Path("data/agent_queues/api_allowed_60m")
-DEFAULT_PROMPT = Path("workspace/docs_exports/agent-large-segment-split-prompt.md")
+DEFAULT_INPUT = Path("workspace/03_agent_split_jobs/agent_jobs/large_segments_60m_api_allowed.jsonl")
+DEFAULT_OUTPUT_ROOT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m")
+DEFAULT_PROMPT = Path("workspace/03_agent_split_jobs/prompts/agent-large-segment-split-prompt.md")
 
 
 def safe_name(job_id):

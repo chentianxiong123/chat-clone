@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 
 
-DEFAULT_WORKSPACE_ROOT = Path("data/agent_workspaces/api_allowed_60m")
-DEFAULT_OUTPUT = Path("data/agent_workspaces/api_allowed_60m/progress.summary.json")
+DEFAULT_WORKSPACE_ROOT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m")
+DEFAULT_OUTPUT = Path("workspace/04_ai_batch_workspaces/agent_queues/api_allowed_60m/progress.summary.json")
 
 
 def iter_jsonl(path):

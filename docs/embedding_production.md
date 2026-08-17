@@ -16,7 +16,7 @@ The embedding runtime should come from `llama.cpp-lora-embed`, usually by starti
 
 ## Expected Inputs
 
-- Approved segment JSONL, usually under `workspace/`.
+- Approved segment JSONL, usually under `workspace/06_final_segments/`.
 - Embedding model path under `models/`.
 - Optional run configuration under local env vars or ignored workspace files.
 
@@ -34,7 +34,7 @@ All production outputs are local artifacts and must stay out of Git:
 
 Keep future scripts callable by stage:
 
-- `build_retrieval_docs`: segment JSONL to retrieval-document JSONL.
+- `build_retrieval_docs`: segment JSONL to retrieval-document JSONL under `workspace/07_rag_embedding/`.
 - `embed_docs`: retrieval-document JSONL to vectors plus metadata.
 - `build_index`: vectors plus metadata to a searchable local index.
 - `query_index`: query text to ranked retrieved segments.
