@@ -1,6 +1,6 @@
-# qwen-chat-rx580-lora-persona-agent
+# chat-clone
 
-Local tooling for building a Qwen-based persona agent on AMD RX580/RX590-class hardware, including chat-record cleaning, agent-assisted segmentation, lightweight LoRA/SFT dataset construction, and RAG/embedding preparation.
+Local tooling for building a chat persona clone via RAG and LoRA, including chat-record cleaning, agent-assisted segmentation, dataset construction, and embedding pipeline.
 
 The repository is intended to contain only release-safe code and workflow documentation. Raw chat exports, generated datasets, model weights, LoRA adapters, compiled binaries, local queues, and private workspaces are ignored by Git.
 
@@ -13,7 +13,7 @@ ggerganov/llama.cpp
         ↓ upstream sync
 chentianxiong123/llama.cpp-lora-embed
         ↓ runtime dependency
-chentianxiong123/qwen-chat-rx580-lora-persona-agent
+chentianxiong123/chat-clone
 ```
 
 Use `llama.cpp-lora-embed` for the local runtime: Qwen inference, LoRA loading, Q-LoRA experiments, and OpenAI-compatible embedding service. Use this repository for private chat processing, segment review, retrieval documents, SFT/RAG dataset construction, and persona-agent workflow scripts.
