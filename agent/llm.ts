@@ -1,3 +1,4 @@
+import OpenAI from 'openai'
 import { config } from './config.js'
 
 export interface ChatMessage {
@@ -5,35 +6,24 @@ export interface ChatMessage {
   content: string
 }
 
+const client = new OpenAI({
+  baseURL: config.llm.baseUrl,
+  apiKey: config.llm.apiKey,
+})
+
 export async function callLlm(messages: ChatMessage[]): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const resp = await fetch(`${config.llm.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.llm.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: config.llm.model,
-          messages,
-          max_tokens: 1024,
-          temperature: 1.0,
-          chat_template_kwargs: { enable_thinking: false },
-        }),
+      const resp = await client.chat.completions.create({
+        model: config.llm.model,
+        messages,
+        max_tokens: 1024,
+        temperature: 1.0,
+      }, {
+        body: { chat_template_kwargs: { enable_thinking: false } },
       })
-
-      if (!resp.ok) {
-        const text = await resp.text()
-        console.warn(`[LLM] 重试 ${attempt + 1}/3: ${resp.status} ${text.slice(0, 80)}`)
-        await sleep(1000)
-        continue
-      }
-
-      const data: any = await resp.json()
-      const content = data.choices?.[0]?.message?.content
+      const content = resp.choices?.[0]?.message?.content
       if (content) return content.trim()
-
       console.warn(`[LLM] 重试 ${attempt + 1}/3: 空响应`)
       await sleep(1000)
     } catch (e) {

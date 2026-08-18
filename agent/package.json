@@ -7,13 +7,15 @@
     "start": "node --env-file=.env --import tsx index.ts"
   },
   "dependencies": {
+    "node-napcat-ts": "^0.4.25",
+    "openai": "^7.5.0",
     "ws": "^8.0.0"
   },
   "devDependencies": {
-    "tsx": "^4.0.0",
-    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0",
     "@types/ws": "^8.0.0",
-    "@types/node": "^22.0.0"
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true
