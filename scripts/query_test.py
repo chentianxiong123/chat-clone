@@ -13,7 +13,7 @@ def embed_api(text):
     data = json.dumps({"model": "qwen3-embedding-0.6b", "input": text}).encode("utf-8")
     req = urllib.request.Request("https://api.futureppo.top/v1/embeddings",
         data=data, headers={"Content-Type": "application/json",
-        "Authorization": "Bearer [REDACTED]"})
+        "Authorization": "Bearer sk-EC3TPAMBM8BZ3daVrMZAIAZ2OtGOQcdJT7Ryq1q7UAIyNeic"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())["data"][0]["embedding"]
 

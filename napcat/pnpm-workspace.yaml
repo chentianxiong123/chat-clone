@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+allowBuilds:
+  '@heroui/shared-utils': set this to true or false
+  '@homebridge/node-pty-prebuilt-multiarch': set this to true or false
+  '@swc/core': set this to true or false
+  esbuild: set this to true or false
+  sharp: set this to true or false
+  ttf2woff2: set this to true or false
+  unrs-resolver: set this to true or false

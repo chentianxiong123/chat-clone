@@ -25,16 +25,19 @@ Use `llama.cpp-lora-embed` for the local runtime: Qwen inference, LoRA loading, 
 
 ```text
 chat_records/                      ← source: WeChat 3.x + QQ 9.x JSONL
-  → 01_sessions_60m/               ← 60-minute session bucketing
-  → 02_policy_route_sensitive_split/ ← API-safe / blocked routing
-  → 03_agent_split_jobs/            ← agent job construction
-  → 04_ai_batch_workspaces/         ← Claude API batch processing
-  → 05_agent_decisions/             ← merged & normalized decisions
-  → 06_final_segments/              ← final chat segments
-  → 07_rag_embedding/               ← retrieval docs + sqlite-vec store
-  → 08_sft_datasets/                ← SFT training data
-  → 09_train_runs/                  ← LoRA / Q-LoRA training
+  → 01_sessions_60m               ← session bucketing (intermediate, deleted)
+  → 02_policy_route_sensitive_split ← API-safe / blocked routing (intermediate, deleted)
+  → 03_agent_split_jobs          ← agent job construction (intermediate, deleted)
+  → 04_ai_batch_workspaces       ← Claude API batch processing (intermediate, deleted)
+  → 05_agent_decisions           ← merged & normalized decisions (intermediate, deleted)
+  → 06_final_segments            ← final chat segments (intermediate, deleted)
+  → 07_rag_embedding/            ← sqlite-vec store (final artifact, retained)
+  → 08_sft_datasets / 09_train_runs ← (retired)
 ```
+
+Intermediate stages (01–06) are deleted after the vector store is built; the sole retained
+artifact is `workspace/07_rag_embedding/stores/qwen_persona_rag.sqlite`. See
+docs/workspace_layout.md` for the full layout history.
 
 The current direction favors **RAG and retrieval-augmented behavior** over relying on a small LoRA model to learn long-range personality logic. See `docs/embedding_production.md` for the embedding pipeline shape.
 
@@ -53,8 +56,8 @@ The current direction favors **RAG and retrieval-augmented behavior** over relyi
 ## What Is Included
 
 - `scripts/`: data extraction helpers, segmentation builders, queue utilities, SFT dataset builders, embedding worker, and normalization scripts.
-- `config/` and `configs/`: review policy and training configuration templates.
-- `docs/`: project workflow notes, embedding production, concurrent guide.
+- `config/`: review policy templates.
+- `docs/`: project workflow notes, embedding production, concurrent guide, workspace layout.
 - `chat_records/docs/GUIDE.md`: WeChat/QQ extraction technical guide.
 - `.gitignore`: protects private data, model files, local environments, compiled binaries, and generated outputs.
 
@@ -63,9 +66,7 @@ The current direction favors **RAG and retrieval-augmented behavior** over relyi
 | Path | Description |
 |------|-------------|
 | `chat_records/` | Raw WeChat & QQ JSONL exports |
-| `workspace/05_agent_decisions/` | Claude API segment decisions |
-| `workspace/06_final_segments/` | Final chat segments (RAG source) |
-| `workspace/07_rag_embedding/stores/qwen_persona_rag.sqlite` | sqlite-vec store (~181MB, 17,846 chunks, 1024-dim) |
+| `workspace/07_rag_embedding/stores/qwen_persona_rag.sqlite` | sqlite-vec store (~181MB, 17,846 chunks, 1024-dim) — the sole retained pipeline artifact |
 | `adapters/` | Trained LoRA adapters (`.gguf`) |
 | `bin/` | llama.cpp Vulkan binaries |
 

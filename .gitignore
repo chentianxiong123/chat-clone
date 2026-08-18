@@ -60,3 +60,9 @@ Thumbs.db
 # Local private workspace artifacts
 workspace/
 scripts/process_batch.ps1
+
+# model/ 目录只入库占位符
+model/*
+!model/README.md
+!model/.gitkeep
+!.env.example

@@ -27,7 +27,7 @@ embed_worker_sqlite_vec.py (唯一脚本)
 ### 1. 环境准备
 
 ```bash
-cd D:\files\qwen-chat
+cd <project_root>
 .venv\Scripts\pip install openai sqlite-vec
 ```
 
@@ -37,13 +37,13 @@ cd D:\files\qwen-chat
 .venv\Scripts\python.exe scripts/init_rag_sqlite_vec.py
 ```
 
-### 3. 启动本地 llama-server (可选)
+### 3. 启动本地 llama-server（可选）
 
 如果要用本地 GPU 嵌入，需要先启动 llama-server：
 
 ```bash
-D:\llama-lora-embed\build\bin\Release\llama-server.exe ^
-  --model D:\models\qwen3-embedding-0.6b-q8_0.gguf ^
+<llama_build>\llama-server.exe ^
+  --model <model_dir>\qwen3-embedding-0.6b-q8_0.gguf ^
   --host 127.0.0.1 --port 8081 ^
   --embedding --pooling last --embd-normalize 2 ^
   --main-gpu 0 --n-gpu-layers 9999 ^
@@ -54,46 +54,60 @@ D:\llama-lora-embed\build\bin\Release\llama-server.exe ^
 
 ---
 
-## 启动命令
+## 环境变量配置
 
-### 本地 GPU (RX590, batch=32, 最快)
+所有远程 API 密钥通过环境变量传递，**不硬编码在文档或脚本中**：
 
 ```bash
-D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
+set CLOUDFLARE_WORKERS_URL=https://<your-worker>.workers.dev/v1/embeddings
+set PIEXIAN_ENDPOINT=https://api.pie-xian.com/v1/embeddings
+set PIEXIAN_API_KEY=<your_pie_xian_key>
+set FUTUREPPO_ENDPOINT=https://api.futureppo.top/v1/embeddings
+set FUTUREPPO_API_KEY=<your_futureppo_key>
+```
+
+---
+
+## 启动命令
+
+### 本地 GPU（RX590, batch=32, 最快）
+
+```bash
+<venv_python> scripts/embed_worker_sqlite_vec.py ^
   --provider local --model qwen3-embedding-0.6b ^
   --endpoint http://127.0.0.1:8081/v1/embeddings ^
   --batch-size 32 --limit 5000 ^
   --claim-any-provider --claim-any-model
 ```
 
-### Cloudflare Workers AI (免费额度, batch=1)
+### Cloudflare Workers AI（免费额度, batch=1）
 
 ```bash
-D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
+<venv_python> scripts/embed_worker_sqlite_vec.py ^
   --provider cloudflare --model qwen3-embedding-0.6b ^
-  --endpoint https://qwen3-embedding.YOUR_WORKER_ID.workers.dev/v1/embeddings ^
+  --endpoint %CLOUDFLARE_WORKERS_URL% ^
   --batch-size 1 --limit 500 ^
   --claim-any-provider --claim-any-model
 ```
 
-### Pie-Xian API (batch=1)
+### Pie-Xian API（batch=1）
 
 ```bash
-D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
+<venv_python> scripts/embed_worker_sqlite_vec.py ^
   --provider pie-xian --model qwen3-embedding-0.6b ^
-  --endpoint https://api.pie-xian.com/v1/embeddings ^
-  --api-key  ^
+  --endpoint %PIEXIAN_ENDPOINT% ^
+  --api-key %PIEXIAN_API_KEY% ^
   --batch-size 1 --limit 200 ^
   --claim-any-provider --claim-any-model
 ```
 
-### FuturePPO API (batch=1)
+### FuturePPO API（batch=1）
 
 ```bash
-D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
+<venv_python> scripts/embed_worker_sqlite_vec.py ^
   --provider futureppo --model qwen3-embedding-0.6b ^
-  --endpoint https://api.futureppo.top/v1/embeddings ^
-  --api-key  ^
+  --endpoint %FUTUREPPO_ENDPOINT% ^
+  --api-key %FUTUREPPO_API_KEY% ^
   --batch-size 1 --limit 200 ^
   --claim-any-provider --claim-any-model
 ```
@@ -107,7 +121,7 @@ D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
 | `--provider` | 标识来源，写入 embedding_jobs 表 | 任意标识符 |
 | `--model` | 嵌入模型名 | `qwen3-embedding-0.6b` |
 | `--endpoint` | OpenAI 兼容的嵌入 API 端点 | 见上方各平台 |
-| `--api-key` | API 密钥（本地不需要） | 见上方各平台 |
+| `--api-key` | API 密钥（本地不需要，远程从环境变量读取） | 见上方各平台 |
 | `--batch-size` | 每次请求的文本数 | 本地 32, 远程 1 |
 | `--limit` | 处理多少条后退出（0=无限） | 200-5000 |
 | `--claim-any-provider` | 允许抢任何 provider 的 pending 任务 | 必须加 |
@@ -146,7 +160,7 @@ D:\files\qwen-chat\.venv\Scripts\python.exe scripts/embed_worker_sqlite_vec.py ^
 
 ```python
 import sqlite3
-db = r'D:\files\qwen-chat\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite'
+db = r'<project_root>\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite'
 conn = sqlite3.connect(db)
 c = conn.cursor()
 c.execute("SELECT status, COUNT(*) FROM embedding_jobs GROUP BY status")
@@ -166,7 +180,7 @@ conn.close()
 
 ```python
 import sqlite3
-db = r'D:\files\qwen-chat\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite'
+db = r'<project_root>\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite'
 conn = sqlite3.connect(db, timeout=10)
 c = conn.cursor()
 c.execute("""UPDATE embedding_jobs
@@ -196,35 +210,39 @@ conn.close()
 
 ---
 
-## 一键启动脚本 (PowerShell)
+## 一键启动脚本（PowerShell）
 
 ```powershell
 # start_all_workers.ps1
-$venv = "D:\files\qwen-chat\.venv\Scripts\python.exe"
-$script = "D:\files\qwen-chat\scripts\embed_worker_sqlite_vec.py"
-$db = "D:\files\qwen-chat\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite"
+$venv  = "<project_root>\.venv\Scripts\python.exe"
+$script = "<project_root>\scripts\embed_worker_sqlite_vec.py"
+$db     = "<project_root>\workspace\07_rag_embedding\stores\qwen_persona_rag.sqlite"
 $common = @("--db", $db, "--model", "qwen3-embedding-0.6b", "--claim-any-provider", "--claim-any-model")
 
 # 本地 GPU
 Start-Process $venv -ArgumentList @($script) + $common + @(
-    "--provider", "local", "--endpoint", "http://127.0.0.1:8081/v1/embeddings",
+    "--provider", "local",
+    "--endpoint", "http://127.0.0.1:8081/v1/embeddings",
     "--batch-size", "32", "--limit", "5000")
 
 # Cloudflare
 Start-Process $venv -ArgumentList @($script) + $common + @(
-    "--provider", "cloudflare", "--endpoint", "https://qwen3-embedding.YOUR_WORKER_ID.workers.dev/v1/embeddings",
+    "--provider", "cloudflare",
+    "--endpoint", $env:CLOUDFLARE_WORKERS_URL,
     "--batch-size", "1", "--limit", "500")
 
 # Pie-Xian
 Start-Process $venv -ArgumentList @($script) + $common + @(
-    "--provider", "pie-xian", "--endpoint", "https://api.pie-xian.com/v1/embeddings",
-    "--api-key", "",
+    "--provider", "pie-xian",
+    "--endpoint", $env:PIEXIAN_ENDPOINT,
+    "--api-key", $env:PIEXIAN_API_KEY,
     "--batch-size", "1", "--limit", "200")
 
 # FuturePPO
 Start-Process $venv -ArgumentList @($script) + $common + @(
-    "--provider", "futureppo", "--endpoint", "https://api.futureppo.top/v1/embeddings",
-    "--api-key", "",
+    "--provider", "futureppo",
+    "--endpoint", $env:FUTUREPPO_ENDPOINT,
+    "--api-key", $env:FUTUREPPO_API_KEY,
     "--batch-size", "1", "--limit", "200")
 
 Write-Host "4 workers launched"
