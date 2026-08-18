@@ -62,7 +62,7 @@ async function flush(gid: number): Promise<void> {
   try {
     const ragContext = await searchRag(ctx)
     const systemPrompt = buildSystemPrompt(ragContext)
-    const userMessage = `${ctx}\n廖：`
+    const userMessage = `${ctx}\n${config.persona.name}：`
     const reply = await callLlm(systemPrompt, userMessage)
     if (!reply) { console.log('[Bot] LLM 无回复，跳过'); return }
     console.log(`[Bot] 回复 g${gid}: ${reply}`)

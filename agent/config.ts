@@ -14,7 +14,7 @@ export const config = {
     embedEndpoint: 'http://127.0.0.1:8081/v1/embeddings',
   },
   persona: {
-    name: '本人',
+    name: '崽种',
     friendName: '朋友',
   },
 }
