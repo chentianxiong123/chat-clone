@@ -1,5 +1,8 @@
 export const config = {
-  napcat: { host: '127.0.0.1', port: 3001 },
+  napcat: {
+    host: process.env.NAPCAT_HOST || '127.0.0.1',
+    port: Number(process.env.NAPCAT_PORT) || 3001,
+  },
   llm: {
     provider: 'openai',
     baseUrl: process.env.LLM_BASE_URL || 'https://apihub.agnes-ai.com/v1',
