@@ -1,5 +1,5 @@
 import { config } from './config.js'
-import { callLlm } from './llm.js'
+import { callLlm, type ChatMessage } from './llm.js'
 import { searchRag } from './rag.js'
 import { buildSystemPrompt } from './prompt.js'
 import WebSocket from 'ws'
@@ -7,22 +7,23 @@ import WebSocket from 'ws'
 // ── 双触发条件参数 ──────────────────────────────────────────────
 const BATCH_N = 5          // 攒够 N 条 → 立即触发
 const BATCH_T = 60_000     // 距上一条超过 T ms → 触发（防抖）
+const MAX_HISTORY = 20     // 每群对话表最长消息数（超了丢最老）
 // ────────────────────────────────────────────────────────────────
 
-// 按群分组攒批：groupId -> 消息队列
-const pending = new Map<number, string[]>()
+// 按群分组攒批 + 对话表（OpenAI chat 格式）
+const pending = new Map<number, { lines: string[] }>()
+const dialogs = new Map<number, ChatMessage[]>()  // 不含 system，system 每次现拼
 const timers = new Map<number, ReturnType<typeof setTimeout>>()
 
 const ws = new WebSocket(`ws://${config.napcat.host}:${config.napcat.port}`)
 
-ws.on('open', () => console.log('[Bot] 已连接 NapCat (双触发模式, N=5, T=60s)'))
+ws.on('open', () => console.log('[Bot] 已连接 NapCat (对话表+双触发, N=5, T=60s)'))
 
 ws.on('message', raw => {
   try {
     const msg = JSON.parse(raw.toString())
     if (msg.post_type !== 'message') return
     if (msg.message_type !== 'group') return
-    // 自己发的消息跳过（NapCat 会推送自己的消息）
     if (msg.self_id && msg.user_id === msg.self_id) return
 
     const text = extractText(msg.message)
@@ -32,12 +33,13 @@ ws.on('message', raw => {
     const who = msg.sender?.nickname || '朋友'
     const line = `${who}: ${text}`
 
-    if (!pending.has(gid)) pending.set(gid, [])
-    pending.get(gid)!.push(line)
-    console.log(`[Bot] 攒批 g${gid} (${pending.get(gid)!.length}/${BATCH_N}): ${text.slice(0, 24)}`)
+    let g = pending.get(gid)
+    if (!g) { g = { lines: [] }; pending.set(gid, g) }
+    g.lines.push(line)
+    console.log(`[Bot] 攒批 g${gid} (${g.lines.length}/${BATCH_N}): ${text.slice(0, 24)}`)
 
     // 条件A：攒够 N 条 → 立即触发
-    if (pending.get(gid)!.length >= BATCH_N) {
+    if (g.lines.length >= BATCH_N) {
       flush(gid)
       return
     }
@@ -53,19 +55,36 @@ ws.on('message', raw => {
 async function flush(gid: number): Promise<void> {
   const old = timers.get(gid)
   if (old) { clearTimeout(old); timers.delete(gid) }
-  const lines = pending.get(gid)
-  if (!lines || lines.length === 0) return
+  const g = pending.get(gid)
+  if (!g || g.lines.length === 0) return
   pending.delete(gid)
 
-  const ctx = lines.join('\n')
-  console.log(`[Bot] 触发 g${gid}: 共 ${lines.length} 条`)
+  const ctx = g.lines.join('\n')
+  console.log(`[Bot] 触发 g${gid}: 共 ${g.lines.length} 条`)
+
   try {
+    // RAG 搜索 → 动态 system
     const ragContext = await searchRag(ctx)
     const systemPrompt = buildSystemPrompt(ragContext)
-    const userMessage = `${ctx}\n${config.persona.name}：`
-    const reply = await callLlm(systemPrompt, userMessage)
+
+    // 拼接对话表：system + 历史 + 本次
+    const hist = (dialogs.get(gid) ?? []).slice(-MAX_HISTORY)
+    const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：` }
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt } as ChatMessage,
+      ...hist,
+      userMsg,
+    ]
+
+    const reply = await callLlm(messages)
     if (!reply) { console.log('[Bot] LLM 无回复，跳过'); return }
     console.log(`[Bot] 回复 g${gid}: ${reply}`)
+
+    // 回写对话表（user+assistant 成对追加，超长截断）
+    const assistantMsg: ChatMessage = { role: 'assistant', content: reply }
+    const updated: ChatMessage[] = [...hist, userMsg, assistantMsg].slice(-MAX_HISTORY)
+    dialogs.set(gid, updated)
+
     ws.send(JSON.stringify({ action: 'send_msg', params: { group_id: gid, message: reply } }))
   } catch (e) {
     console.error('[Bot] flush 错误:', e)

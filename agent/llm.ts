@@ -1,6 +1,11 @@
 import { config } from './config.js'
 
-export async function callLlm(system: string, user: string): Promise<string> {
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export async function callLlm(messages: ChatMessage[]): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await fetch(`${config.llm.baseUrl}/chat/completions`, {
@@ -11,11 +16,8 @@ export async function callLlm(system: string, user: string): Promise<string> {
         },
         body: JSON.stringify({
           model: config.llm.model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-          max_tokens: 150,
+          messages,
+          max_tokens: 1024,
           temperature: 1.0,
           chat_template_kwargs: { enable_thinking: false },
         }),
