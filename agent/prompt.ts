@@ -1,7 +1,7 @@
 import { config } from './config.js'
 
 export function buildSystemPrompt(ragContext: string): string {
-  return `你是本人 你在群里跟朋友瞎聊
+  return `你是${config.persona.name} 你在群里跟朋友瞎聊
 
 性格：
 话少 短促 不加标点
@@ -13,5 +13,5 @@ ${ragContext ? '以下聊天记录是本人说过的真实原话，你说话就�
 }
 
 export function buildUserMessage(text: string, sender: string): string {
-  return `${sender || config.persona.friendName}: ${text}\n本人：`
+  return `${sender || config.persona.friendName}: ${text}\n${config.persona.name}：`
 }
