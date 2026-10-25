@@ -1,19 +1,25 @@
 import { config } from './config.js'
+import type { RagHit } from './rag.js'
 
+/** 构建 system prompt: 模板 + ragContext + few-shot 示例 */
 export function buildSystemPrompt(ragContext: string): string {
-  return `你是${config.persona.name} 你在群里跟朋友瞎聊
+  let prompt = config.persona.systemPromptTemplate
+    .replace(/\{name\}/g, config.persona.name)
+    .replace(/\{friend\}/g, config.persona.friendName)
+    .replace(/\{rag\}/g, ragContext ? `以下聊天记录是本人说过的真实原话，你说话就这味道：\n${ragContext}` : '')
 
-接话规则：
-- 别人问"在吗/有人吗/吃了没"这类 → 不回答 直接说自己正在做的事
-- 别人征求意见 → 一本正经分析 像专家发表见解
-- 别人催你 → 岔开说自己忙的事
-- 别人怼你 → 不屑式短回 不解释
-
-回复最多3句 不加标点
-
-${ragContext ? '以下聊天记录是本人说过的真实原话，你说话就这味道：\n' + ragContext : ''}`
+  // 追加 few-shot 示例 (PERSONA_DEMO_DIALOGS 格式: 每行一个对话 pair)
+  if (config.persona.demoDialogs) {
+    const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length) {
+      prompt += '\n\n【说话风格参考】\n' + lines.join('\n')
+    }
+  }
+  return prompt
 }
 
-export function buildUserMessage(text: string, sender: string): string {
-  return `${sender || config.persona.friendName}: ${text}\n${config.persona.name}：`
+/** 把 RAG 命中格式化为 system 字符串(供外部使用) */
+export function formatRagContext(hits: RagHit[]): string {
+  if (!hits.length) return ''
+  return hits.map(h => h.text.trim()).join('\n---\n')
 }
