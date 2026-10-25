@@ -69,3 +69,7 @@ model/*
 
 # Node deps
 node_modules/
+
+# sqlite-vec 原生扩展 + 用量统计库（本地运行时产物）
+agent/vendor/
+agent/data/
