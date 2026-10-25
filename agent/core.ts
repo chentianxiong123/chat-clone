@@ -27,6 +27,7 @@ export interface GroupView {
 
 export interface AgentSnapshot {
   connected: boolean
+  connError?: string
   selfName: string
   lastReplyAt: number
   cooldownLeftMs: number
@@ -47,6 +48,7 @@ export class AgentCore {
   private lastReplyAt = 0
   private listeners = new Set<Listener>()
   connected = false
+  connError?: string
 
   /** 协议端接线：core 计算出回复后回调这里发消息 */
   onReply?: (groupId: number, text: string) => Promise<void>
@@ -102,7 +104,7 @@ export class AgentCore {
       const systemPrompt = buildSystemPrompt(ragContext)
 
       const hist = (this.dialogs.get(gid) ?? []).slice(-config.agent.maxHistory)
-      const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：` }
+      const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
@@ -117,7 +119,7 @@ export class AgentCore {
       }
       console.log(`[Core] 回复 g${gid}: ${reply}`)
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: reply }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...hist, userMsg, assistantMsg].slice(-config.agent.maxHistory)
       this.dialogs.set(gid, updated)
 
@@ -166,6 +168,7 @@ export class AgentCore {
     }
     return {
       connected: this.connected,
+      connError: this.connError,
       selfName: config.persona.name,
       lastReplyAt: this.lastReplyAt,
       cooldownLeftMs: Math.max(0, this.lastReplyAt + config.agent.replyCooldown - now),
@@ -181,8 +184,27 @@ export class AgentCore {
     return () => this.listeners.delete(fn)
   }
 
-  setConnected(v: boolean): void {
+  setConnected(v: boolean, err?: string): void {
     this.connected = v
+    this.connError = err
+    this.emit()
+  }
+
+  /** 清空某个群 / 全部群的会话记忆 */
+  clearDialog(gid?: number): void {
+    if (gid != null) {
+      this.dialogs.delete(gid)
+      this.pending.delete(gid)
+      const t = this.timers.get(gid)
+      if (t) { clearTimeout(t.handle); this.timers.delete(gid) }
+      console.log(`[Core] 清空群 ${gid} 的会话记忆`)
+    } else {
+      this.dialogs.clear()
+      this.pending.clear()
+      for (const t of this.timers.values()) clearTimeout(t.handle)
+      this.timers.clear()
+      console.log('[Core] 清空全部会话记忆')
+    }
     this.emit()
   }
 

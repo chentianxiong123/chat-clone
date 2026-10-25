@@ -22,6 +22,7 @@ document.querySelectorAll('.tab').forEach((btn) => {
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'))
     btn.classList.add('active')
     $('tab-' + btn.dataset.tab).classList.add('active')
+    if (btn.dataset.tab === 'stats') loadStats()
   })
 })
 
@@ -38,6 +39,9 @@ function renderState(snap) {
   currentSnap = snap
   $('conn-dot').className = 'pulse-dot ' + (snap.connected ? 'live' : 'dead')
   $('conn-text').textContent = snap.connected ? `NapCat 已连接` : 'NapCat 未连接'
+  const connPill = document.querySelector('.status-pill')
+  connPill.title = snap.connError || (snap.connected ? '连接正常' : '未接入 NapCat 适配器')
+  if (snap.connError) connPill.classList.add('ring-1', 'ring-red-500/50')
   $('batch-info').textContent = `N=${snap.batchN} / T=${(snap.batchT / 1000).toFixed(0)}s`
   $('cooldown').textContent = snap.cooldownLeftMs > 0 ? fmtSince(snap.cooldownLeftMs) : '就绪'
   $('group-count').textContent = String(Object.keys(snap.groups).length)
@@ -62,14 +66,32 @@ function renderGroup(g) {
   const timerBadge = tLeft !== null
     ? `<span class="badge badge-sm badge-warning">攒批中 ${fmtSince(tLeft)}</span>`
     : (g.pending.length ? `<span class="badge badge-sm badge-info">待触发</span>` : ``)
+  // 攒批进度条：目标 N 条
+  const batchPct = Math.min(100, Math.round((g.pending.length / currentSnap.batchN) * 100))
+  const progressHtml = g.pending.length
+    ? `<div class="mt-2">
+        <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${currentSnap.batchN}</span>
+        </div>
+        <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
+          <div class="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full transition-all" style="width:${batchPct}%"></div>
+        </div>
+      </div>`
+    : ``
   const pendingHtml = g.pending.length
-    ? `<div class="text-xs text-amber-300/80 mt-1">攒批（${g.pending.length}）：
+    ? `<div class="text-xs text-amber-300/80 mt-1">攒批：
         <span class="font-mono">${esc(g.pending.join(' ').slice(0, 160))}</span></div>`
     : ``
+  // 记忆：每条带时间戳 + 角色色差
   const dialogHtml = g.dialog.length
-    ? `<div class="text-xs text-slate-400 mt-1"><span class="text-slate-500">记忆(${g.dialog.length}条)：</span>${
-        g.dialog.map((m) => `${m.role === 'user' ? '👤' : '🤖'}${esc(m.content.slice(0, 60))}`).join(' · ')
-      }</div>`
+    ? `<div class="mt-2 space-y-1">${
+        g.dialog.map((m) => `
+          <div class="text-xs ${m.role === 'user' ? 'text-sky-300' : 'text-emerald-300'} leading-snug">
+            <span class="text-[10px] text-slate-600 font-mono mr-1">${m.time ? fmtTime(m.time) : ''}</span>
+            <span class="${m.role === 'user' ? '' : 'opacity-90'}">${m.role === 'user' ? '👤' : '🤖'}${esc(m.content.slice(0, 80))}</span>
+          </div>`).join('')
+      }</div>
+      <div class="text-[10px] text-slate-600 mt-1">记忆 ${g.dialog.length} 条 · 历史 ${currentSnap.batchN * 2} 轮</div>`
     : ``
   return `
   <div class="glass round-2xl p-4" data-gid="${g.groupId}">
@@ -77,9 +99,11 @@ function renderGroup(g) {
       <div class="font-mono font-semibold">群 ${g.groupId}</div>
       <div class="flex gap-2 items-center">
         ${timerBadge}
+        <button class="btn btn-xs btn-ghost text-error act-clear" title="清空该群记忆">清空</button>
         <button class="btn btn-xs btn-primary act-flush">立即触发</button>
       </div>
     </div>
+    ${progressHtml}
     ${pendingHtml}
     ${dialogHtml}
   </div>`
@@ -92,7 +116,20 @@ function bindGroupButtons() {
       await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) })
     })
   })
+  document.querySelectorAll('.act-clear').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const gid = btn.closest('[data-gid]').dataset.gid
+      if (!confirm(`清空群 ${gid} 的会话记忆？`)) return
+      await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) })
+    })
+  })
 }
+
+// 全清按钮（状态页顶部）
+$('clear-all')?.addEventListener('click', async () => {
+  if (!confirm('清空所有群的会话记忆？')) return
+  await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+})
 
 // ── 调试台 ──
 $('sim-send').addEventListener('click', async () => {
@@ -144,16 +181,42 @@ function renderRagResults(res) {
     { title: 'FTS5 BM25', hits: res.fts, color: 'text-sky-400' },
     { title: 'LIKE 兜底', hits: res.like, color: 'text-slate-400' },
   ]
+  const q = res.q || $('rag-q').value.trim()
+  const terms = q.split(/\s+/).filter(Boolean).map(esc)
+  const hl = (text) => {
+    const safe = esc(text)
+    if (!terms.length) return safe
+    let out = safe
+    for (const t of terms) {
+      if (!t) continue
+      out = out.split(t).join(`<mark class="bg-amber-300/30 text-amber-200 rounded px-0.5">${t}</mark>`)
+    }
+    return out
+  }
   box.innerHTML = cols.map((c) => `
     <div class="glass round-2xl p-4">
       <div class="text-xs font-semibold ${c.color} mb-2">${c.title}（${c.hits.length}）</div>
       ${c.hits.length ? c.hits.map((h, i) => `
         <div class="mb-2 p-2 rounded-lg bg-black/30">
-          <div class="text-[10px] text-slate-500 font-mono">#${i + 1} score=${h.score.toFixed(4)} · ${h.date} · ${h.chunkId}</div>
-          <div class="text-xs whitespace-pre-wrap mt-1">${esc(h.text.slice(0, 180))}${h.text.length > 180 ? '…' : ''}</div>
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-slate-500 font-mono">#${i + 1} score=${h.score.toFixed(4)} · ${h.date} · ${h.chunkId}</div>
+            <button class="btn btn-xs btn-ghost text-[10px] rag-copy" data-text="${esc(h.text)}">复制</button>
+          </div>
+          <div class="text-xs whitespace-pre-wrap mt-1">${hl(h.text.slice(0, 220))}${h.text.length > 220 ? '…' : ''}</div>
         </div>`).join('')
       : `<div class="text-xs text-slate-600">无结果</div>`}
     </div>`).join('')
+  box.querySelectorAll('.rag-copy').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.text)
+        btn.textContent = '✓'
+        setTimeout(() => { btn.textContent = '复制' }, 1200)
+      } catch {
+        btn.textContent = '✗'
+      }
+    })
+  })
 }
 
 // ── 手测 LLM ──
@@ -264,31 +327,7 @@ function appendLog(entry) {
 }
 $('log-clear').addEventListener('click', () => { $('log-box').innerHTML = ''; logCount = 0 })
 
-// ── 用量统计 tab 注入（配置 tab 旁加一个）──
-document.querySelectorAll('.tab').forEach((b) => {
-  if (b.dataset.tab === 'config') {
-    const nav = b.parentElement
-    const statsBtn = document.createElement('button')
-    statsBtn.className = 'tab'
-    statsBtn.dataset.tab = 'stats'
-    statsBtn.textContent = '用量'
-    nav.insertBefore(statsBtn, b.nextSibling)
-    statsBtn.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'))
-      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'))
-      statsBtn.classList.add('active')
-      $('tab-stats').classList.add('active')
-      loadStats()
-    })
-  }
-})
-
-// 用量面板容器（动态插入）
-const statsSection = document.createElement('section')
-statsSection.id = 'tab-stats'
-statsSection.className = 'tab-panel'
-document.querySelector('footer').insertAdjacentElement('beforebegin', statsSection)
-
+// ── 用量统计 ──
 async function loadStats() {
   const r = await fetch('/api/stats?hours=24')
   const s = await r.json()
@@ -299,8 +338,17 @@ async function loadStats() {
   const series = s.timeseries || []
   const maxCalls = Math.max(1, ...series.map((x) => x.llmCalls + x.embedCalls))
   const gEntries = Object.entries(groups).sort((a, b) => b[1].msg - a[1].msg)
+  const totalMsg = Object.values(groups).reduce((a, g) => a + g.msg, 0) || 0
+  const totalReply = Object.values(groups).reduce((a, g) => a + g.reply, 0) || 0
 
-  const bars = series.map((x) => {
+  $('st-llm').textContent = String(llm.ok + llm.fail || 0)
+  $('st-llm').nextElementSibling.innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br><span class="text-slate-500">Token in ${(llm.tokensIn || 0).toLocaleString()} · out ${(llm.tokensOut || 0).toLocaleString()}</span>`
+  $('st-embed').textContent = String(embed.ok + embed.fail || 0)
+  $('st-embed').nextElementSibling.innerHTML = `成功 ${embed.ok || 0} · 失败 <span class="${embed.fail ? 'text-red-400' : ''}">${embed.fail || 0}</span>`
+  $('st-msg').textContent = `${totalMsg} / ${totalReply}`
+  $('st-msg').nextElementSibling.textContent = `进程运行 ${fmtSince(s.sinceStart)}`
+
+  $('st-bars').innerHTML = series.map((x) => {
     const h = x.hour.slice(11, 16)
     const total = x.llmCalls + x.embedCalls
     const pct = Math.max(4, Math.round((total / maxCalls) * 100))
@@ -311,43 +359,15 @@ async function loadStats() {
     </div>`
   }).join('')
 
-  statsSection.innerHTML = `
-  <div class="grid md:grid-cols-3 gap-4">
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">LLM 调用</div>
-      <div class="text-2xl font-mono mt-1">${llm.ok + llm.fail || 0}</div>
-      <div class="text-xs mt-2">成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span></div>
-      <div class="text-xs text-slate-500 mt-1">Token in ${(llm.tokensIn || 0).toLocaleString()} · out ${(llm.tokensOut || 0).toLocaleString()}</div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">Embed 调用</div>
-      <div class="text-2xl font-mono mt-1">${embed.ok + embed.fail || 0}</div>
-      <div class="text-xs mt-2">成功 ${embed.ok || 0} · 失败 <span class="${embed.fail ? 'text-red-400' : ''}">${embed.fail || 0}</span></div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">群消息 / 回复</div>
-      <div class="text-2xl font-mono mt-1">${Object.values(groups).reduce((a, g) => a + g.msg, 0) || 0} <span class="text-base text-slate-500">/</span> ${Object.values(groups).reduce((a, g) => a + g.reply, 0) || 0}</div>
-      <div class="text-xs mt-2">进程运行 ${fmtSince(s.sinceStart)}</div>
-    </div>
-  </div>
-
-  <div class="glass round-2xl p-5 mt-4">
-    <div class="text-xs text-slate-500 uppercase mb-3">最近 24h 调用趋势（LLM+Embed）</div>
-    <div class="flex items-end gap-1 h-24">${bars}</div>
-  </div>
-
-  <div class="glass round-2xl p-5 mt-4">
-    <div class="text-xs text-slate-500 uppercase mb-3">按群统计</div>
-    ${gEntries.length ? `<table class="table table-xs w-full">
-      <thead><tr><th>群号</th><th>消息</th><th>回复</th><th>最后活跃</th></tr></thead>
-      <tbody>${gEntries.map(([gid, g]) => `<tr>
-        <td class="font-mono">${esc(gid)}</td>
-        <td>${g.msg}</td>
-        <td>${g.reply}</td>
-        <td>${fmtTime(g.lastAt)}</td>
-      </tr>`).join('')}</tbody>
-    </table>` : '<div class="text-xs text-slate-600">暂无数据</div>'}
-  </div>`
+  $('st-table').innerHTML = gEntries.length ? `<table class="table table-xs w-full">
+    <thead><tr><th>群号</th><th>消息</th><th>回复</th><th>最后活跃</th></tr></thead>
+    <tbody>${gEntries.map(([gid, g]) => `<tr>
+      <td class="font-mono">${esc(gid)}</td>
+      <td>${g.msg}</td>
+      <td>${g.reply}</td>
+      <td>${fmtTime(g.lastAt)}</td>
+    </tr>`).join('')}</tbody>
+  </table>` : '<div class="text-xs text-slate-600">暂无数据</div>'
 }
 
 // ── 初始化 ──

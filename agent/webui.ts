@@ -146,6 +146,14 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
         return json(res, 200, { ok: true })
       }
 
+      // ── 清空会话记忆 ──
+      if (path === '/api/clear' && req.method === 'POST') {
+        const body = await readBody(req)
+        const gid = body.groupId != null ? Number(body.groupId) : undefined
+        core.clearDialog(gid)
+        return json(res, 200, { ok: true })
+      }
+
       // ── 读取完整配置快照 ──
       if (path === '/api/config') {
         const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
@@ -200,6 +208,8 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
 function serveStatic(path: string): string | null {
   // 安全：只允许 / 或 /web 前缀，路径规范化后必须在 WEB_DIR 内
   let rel = path === '/' ? 'index.html' : path.replace(/^\/+/, '')
+  // /web/* 剥掉前缀（浏览器引用的静态资源路径），其余按 WEB_DIR 相对路径
+  if (rel.startsWith('web/')) rel = rel.slice(4)
   if (rel.startsWith('api/')) return null
   const full = normalize(join(WEB_DIR, rel))
   if (!full.startsWith(WEB_DIR)) return null

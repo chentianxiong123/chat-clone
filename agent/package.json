@@ -7,7 +7,6 @@
     "start": "node --env-file=.env --import tsx index.ts"
   },
   "dependencies": {
-    "https-proxy-agent": "^9.1.0",
     "node-napcat-ts": "^0.4.25",
     "openai": "^7.5.0",
     "undici": "^8.12.3",
@@ -16,7 +15,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ws": "^8.0.0",
-    "tsx": "^4.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.0.0"
   },
   "allowScripts": {

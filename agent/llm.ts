@@ -5,6 +5,7 @@ import { recordUsage } from './stats.js'
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  time?: number
 }
 
 const client = new OpenAI({
