@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html data-theme="dark" lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chat-clone Agent 控制台</title>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet">
+<link rel="stylesheet" href="/web/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="page">
+
+<header class="hdr fade-in">
+  <div class="hdr-left">
+    <div class="logo">🤖</div>
+    <div>
+      <h1><span class="gradient">chat-clone</span> · Agent 控制台</h1>
+      <p id="subtitle" class="text-xs text-slate-500">加载中...</p>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="status-pill">
+      <div class="pulse-dot" id="conn-dot"></div>
+      <span id="conn-text" class="text-xs text-slate-400">NapCat --</span>
+    </div>
+    <span id="rag-badge" class="stat-tag">RAG --</span>
+  </div>
+</header>
+
+<nav class="tabs fade-in">
+  <button class="tab active" data-tab="overview">状态</button>
+  <button class="tab" data-tab="simulate">调试台</button>
+  <button class="tab" data-tab="rag">RAG 检索</button>
+  <button class="tab" data-tab="llm">手测 LLM</button>
+  <button class="tab" data-tab="config">配置</button>
+  <button class="tab" data-tab="logs">日志</button>
+</nav>
+
+<!-- ══ 状态 ══ -->
+<section id="tab-overview" class="tab-panel active">
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="glass round-2xl p-5">
+      <div class="text-xs text-slate-500 uppercase">攒批参数</div>
+      <div id="batch-info" class="text-2xl font-mono mt-1">--</div>
+      <div class="text-xs text-slate-500 mt-2">冷却剩余 <span id="cooldown" class="font-mono text-indigo-400">--</span></div>
+    </div>
+    <div class="glass round-2xl p-5">
+      <div class="text-xs text-slate-500 uppercase">活跃群</div>
+      <div id="group-count" class="text-2xl font-mono mt-1">--</div>
+      <div class="text-xs text-slate-500 mt-2">上次回复 <span id="last-reply" class="font-mono text-indigo-400">--</span></div>
+    </div>
+    <div class="glass round-2xl p-5">
+      <div class="text-xs text-slate-500 uppercase">会话记忆</div>
+      <div id="dialog-total" class="text-2xl font-mono mt-1">--</div>
+      <div class="text-xs text-slate-500 mt-2">对话表总消息数</div>
+    </div>
+  </div>
+
+  <div id="group-list" class="mt-4 space-y-3"></div>
+</section>
+
+<!-- ══ 调试台 ══ -->
+<section id="tab-simulate" class="tab-panel">
+  <div class="glass round-2xl p-5 mb-4">
+    <div class="text-sm font-semibold mb-3">模拟群消息（NapCat 未接时也能测行为）</div>
+    <div class="flex flex-wrap gap-2">
+      <input id="sim-group" class="input input-sm input-bordered w-32" placeholder="群号" value="10000">
+      <input id="sim-who" class="input input-sm input-bordered w-32" placeholder="昵称" value="测试员">
+      <input id="sim-text" class="input input-sm input-bordered flex-1 min-w-48" placeholder="消息内容...">
+      <button id="sim-send" class="btn btn-sm btn-primary">注入</button>
+      <button id="sim-flush" class="btn btn-sm btn-outline">立即触发攒批</button>
+    </div>
+    <div id="sim-result" class="mt-3 text-xs text-emerald-400 font-mono hidden"></div>
+  </div>
+  <div id="sim-dialog" class="mt-3 space-y-2"></div>
+</section>
+
+<!-- ══ RAG ══ -->
+<section id="tab-rag" class="tab-panel">
+  <div class="glass round-2xl p-5 mb-4">
+    <div class="text-sm font-semibold mb-3">RAG 双路检索测试（向量 vec0 + FTS5 + LIKE）</div>
+    <div class="flex gap-2">
+      <input id="rag-q" class="input input-sm input-bordered flex-1" placeholder="查询内容，如：nmsl / 你妈炸了 / 今天吃什么">
+      <button id="rag-go" class="btn btn-sm btn-primary">检索</button>
+    </div>
+    <div id="rag-meta" class="mt-2 text-xs text-slate-500"></div>
+  </div>
+  <div id="rag-results" class="mt-3 grid md:grid-cols-3 gap-4"></div>
+</section>
+
+<!-- ══ 手测 LLM ══ -->
+<section id="tab-llm" class="tab-panel">
+  <div class="glass round-2xl p-5">
+    <div class="text-sm font-semibold mb-3">手测 LLM（走完整 system + 可选 RAG）</div>
+    <div class="flex flex-wrap items-center gap-3">
+      <label class="flex items-center gap-1 text-xs text-slate-400">
+        <input id="llm-rag" type="checkbox" class="checkbox checkbox-sm checkbox-primary" checked>
+        注入 RAG
+      </label>
+      <select id="llm-model" class="select select-sm select-bordered text-xs"></select>
+      <button id="llm-go" class="btn btn-sm btn-primary ml-auto">发送</button>
+    </div>
+    <textarea id="llm-prompt" class="textarea textarea-bordered w-full mt-3 h-28" placeholder="对 agent 说点什么..."></textarea>
+    <div id="llm-out" class="mt-3 text-sm whitespace-pre-wrap glass round-xl p-4 hidden"></div>
+  </div>
+</section>
+
+<!-- ══ 配置 ══ -->
+<section id="tab-config" class="tab-panel">
+  <div class="glass round-2xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold">agent/.env（改完重启生效）</div>
+      <button id="cfg-reload" class="btn btn-sm btn-ghost">重新读取</button>
+      <button id="cfg-save" class="btn btn-sm btn-primary">保存</button>
+    </div>
+    <textarea id="cfg-editor" class="textarea textarea-bordered w-full h-96 font-mono text-xs" spellcheck="false"></textarea>
+    <div id="cfg-note" class="mt-2 text-xs text-emerald-400"></div>
+    <div id="active-config" class="mt-4"></div>
+  </div>
+</section>
+
+<!-- ══ 日志 ══ -->
+<section id="tab-logs" class="tab-panel">
+  <div class="glass round-2xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold">运行日志（实时 SSE）</div>
+      <button id="log-clear" class="btn btn-sm btn-ghost">清屏</button>
+    </div>
+    <div id="log-box" class="font-mono text-xs h-96 overflow-y-auto bg-black/40 rounded-xl p-3 space-y-1"></div>
+  </div>
+</section>
+
+<footer class="text-center mt-4 mb-3 fade-in">
+  <p class="text-xs text-slate-600">
+    <span class="gradient font-medium">chat-clone</span>
+    · 薄服务 · Node + sqlite-vec + SSE · <span id="footer-time" class="font-mono"></span>
+  </p>
+</footer>
+
+</div>
+<script src="/web/app.js"></script>
+</body>
+</html>
