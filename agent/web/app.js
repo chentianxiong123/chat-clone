@@ -184,11 +184,21 @@ function renderChatFlow() {
     box.innerHTML = `<div class="text-center text-slate-600 text-sm py-8">暂无对话，先在下面「模拟消息」注入一条</div>`
     return
   }
+  // 消息体：assistant 按换行拆成多条气泡（和真实发送一致：回车分割逐条发）
+  const bubbles = (m) => {
+    const isBot = m.role !== 'user'
+    const lines = isBot ? String(m.content).split('\n') : [m.content]
+    const valid = lines.filter((l) => l.trim() !== '').length ? lines : lines
+    const header = `<div class="text-[10px] text-slate-500 mb-1">${m.role === 'user' ? '👤 群友' : '🤖 ' + (currentSnap?.selfName || '我')} · ${m.time ? fmtTime(m.time) : ''}</div>`
+    const body = valid.map((l) => l.trim() === ''
+      ? `<div class="text-[8px] text-slate-700 py-0.5">· · ·</div>`
+      : `<div class="whitespace-pre-wrap break-words">${esc(l)}</div>`).join('')
+    return `${header}${body}`
+  }
   box.innerHTML = sc.dialog.map((m) => `
     <div class="flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}">
       <div class="max-w-[80%] round-xl px-4 py-2 text-sm ${m.role === 'user' ? 'bg-slate-800/70 text-sky-200' : 'bg-indigo-600/50 text-emerald-100'}">
-        <div class="text-[10px] text-slate-500 mb-1">${m.role === 'user' ? '👤 群友' : '🤖 ' + (currentSnap?.selfName || '我')} · ${m.time ? fmtTime(m.time) : ''}</div>
-        <div class="whitespace-pre-wrap break-words">${esc(m.content)}</div>
+        ${bubbles(m)}
       </div>
     </div>`).join('')
   box.scrollTop = box.scrollHeight
@@ -348,6 +358,13 @@ async function loadStats(hours) {
   const totalMsg = Object.values(groups).reduce((a, g) => a + g.msg, 0) || 0
   const totalReply = Object.values(groups).reduce((a, g) => a + g.reply, 0) || 0
 
+  // 费用
+  const cost = agg.totalCost || 0
+  $('st-cost').textContent = cost > 0 ? '¥' + cost.toFixed(4) : '¥0'
+  $('st-cost-sub').innerHTML = (cost > 0
+    ? `LLM ¥${(llm.cost || 0).toFixed(4)} · Embed ¥${(embed.cost || 0).toFixed(4)}`
+    : '未配置价格（LLM_PRICE_PER_M_IN/OUT）→ 免费')
+
   $('st-llm').textContent = String(llm.calls || 0)
   $('st-llm-sub').innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br>成功率 ${pct(llm.successRate)} · 均值 <span class="font-mono">${fmtMs(llm.avgTtftMs)}</span>`
   $('st-embed').textContent = String(embed.calls || 0)
@@ -387,9 +404,12 @@ async function loadStats(hours) {
     ],
   })
 
-  // 模型排行
+  // 模型排行（by Token + 花费）
   $('st-model-rank').innerHTML = mEntries.length
-    ? mEntries.map(([name, m]) => rankRow(name, `${m.calls} 次 · ${fmtNum(m.tokensIn + m.tokensOut)} tok`, `${m.calls ? '✓' + m.ok + ' · 均值 ' + fmtMs(m.avgDurationMs) : '--'}`, (m.tokensIn + m.tokensOut), mEntries[0][1].tokensIn + mEntries[0][1].tokensOut))
+    ? mEntries.map(([name, m]) => {
+        const tok = m.tokensIn + m.tokensOut
+        return rankRow(name, `${m.calls} 次 · ${fmtNum(tok)} tok${(m.cost || 0) > 0 ? ' · ¥' + (m.cost).toFixed(4) : ''}`, `${m.calls ? '✓' + m.ok + ' · 均值 ' + fmtMs(m.avgDurationMs) : '--'}`, tok, mEntries[0][1].tokensIn + mEntries[0][1].tokensOut)
+      }).join('')
     : '<div class="text-xs text-slate-600">暂无数据</div>'
 
   // 按群

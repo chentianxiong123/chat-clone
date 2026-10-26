@@ -19,13 +19,14 @@ export interface UsageRecord {
 export interface UsageSummary {
   totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number }>
   perGroup: Record<string, { msg: number; reply: number; lastAt: number }>
-  perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number }>
+  perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }>
   perProvider: Record<string, { calls: number; cost: number }>
   timeseries: Array<{ hour: string; llmCalls: number; embedCalls: number; msgs: number; replies: number; tokensIn: number; tokensOut: number }>
   sinceStart: number
   agg: {
-    llm: { calls: number; ok: number; fail: number; successRate: number; avgDurationMs: number; avgTtftMs: number; tokensIn: number; tokensOut: number }
-    embed: { calls: number; ok: number; fail: number; successRate: number }
+    llm: { calls: number; ok: number; fail: number; successRate: number; avgDurationMs: number; avgTtftMs: number; tokensIn: number; tokensOut: number; cost: number }
+    embed: { calls: number; ok: number; fail: number; successRate: number; cost: number }
+    totalCost: number
   }
 }
 
@@ -136,19 +137,20 @@ export function getUsageSummary(hours = 24): UsageSummary {
     timeseries: [],
     sinceStart: 0,
     agg: {
-      llm: { calls: 0, ok: 0, fail: 0, successRate: 0, avgDurationMs: 0, avgTtftMs: 0, tokensIn: 0, tokensOut: 0 },
-      embed: { calls: 0, ok: 0, fail: 0, successRate: 0 },
+      llm: { calls: 0, ok: 0, fail: 0, successRate: 0, avgDurationMs: 0, avgTtftMs: 0, tokensIn: 0, tokensOut: 0, cost: 0 },
+      embed: { calls: 0, ok: 0, fail: 0, successRate: 0, cost: 0 },
+      totalCost: 0,
     },
   }
   if (!db) return empty
   const since = Date.now() - hours * 3600 * 1000
   const totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number }> = {}
-  const perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number }> = {}
+  const perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }> = {}
   const perProvider: Record<string, { calls: number; cost: number }> = {}
 
   const agg = {
-    llm: { ok: 0, fail: 0, durationSum: 0, durationN: 0, ttftSum: 0, ttftN: 0, tokensIn: 0, tokensOut: 0 },
-    embed: { ok: 0, fail: 0 },
+    llm: { ok: 0, fail: 0, durationSum: 0, durationN: 0, ttftSum: 0, ttftN: 0, tokensIn: 0, tokensOut: 0, cost: 0 },
+    embed: { ok: 0, fail: 0, cost: 0 },
   }
 
   for (const r of db.prepare(
@@ -176,15 +178,17 @@ export function getUsageSummary(hours = 24): UsageSummary {
       agg.llm.fail += r.fail
       agg.llm.tokensIn += r.tokens_in
       agg.llm.tokensOut += r.tokens_out
+      agg.llm.cost += r.cost
       if (r.duration_ms > 0) { agg.llm.durationSum += r.duration_ms; agg.llm.durationN++ }
       if (r.ttft_ms > 0) { agg.llm.ttftSum += r.ttft_ms; agg.llm.ttftN++ }
 
-      const m = perModel[r.sub || '当前模型'] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0 }
+      const m = perModel[r.sub || '当前模型'] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
       m.calls++
       m.ok += r.ok
       m.fail += r.fail
       m.tokensIn += r.tokens_in
       m.tokensOut += r.tokens_out
+      m.cost += r.cost
       if (r.duration_ms > 0) m.avgDurationMs += r.duration_ms
       if (r.ttft_ms > 0) m.avgTtftMs += r.ttft_ms
       perModel[r.sub || '当前模型'] = m
@@ -192,11 +196,13 @@ export function getUsageSummary(hours = 24): UsageSummary {
     if (r.kind === 'embed') {
       agg.embed.ok += r.ok
       agg.embed.fail += r.fail
+      agg.embed.cost += r.cost
       const key = r.sub || 'Embed'
-      const em = perModel[key] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0 }
+      const em = perModel[key] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
       em.calls++
       em.ok += r.ok
       em.fail += r.fail
+      em.cost += r.cost
       perModel[key] = em
     }
     if (r.kind === 'llm' || r.kind === 'embed') {
@@ -278,13 +284,16 @@ export function getUsageSummary(hours = 24): UsageSummary {
         avgTtftMs: agg.llm.ttftN ? agg.llm.ttftSum / agg.llm.ttftN : 0,
         tokensIn: agg.llm.tokensIn,
         tokensOut: agg.llm.tokensOut,
+        cost: agg.llm.cost,
       },
       embed: {
         calls: embedCalls,
         ok: agg.embed.ok,
         fail: agg.embed.fail,
         successRate: embedCalls ? agg.embed.ok / embedCalls : 0,
+        cost: agg.embed.cost,
       },
+      totalCost: agg.llm.cost + agg.embed.cost,
     },
   }
 }

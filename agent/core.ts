@@ -239,7 +239,7 @@ export class AgentCore {
       // 发消息一定要慢：距上一条回复至少 cooldown
       const wait = this.lastReplyAt + p.cooldown - Date.now()
       if (wait > 0) await sleep(wait)
-      if (this.onReply) await this.onReply(t, id, reply)
+      await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
       recordGroupReply(id)
       this.emit()
@@ -284,7 +284,7 @@ export class AgentCore {
       if (!reply) return
       const wait = this.lastReplyAt + p.cooldown - Date.now()
       if (wait > 0) await sleep(wait)
-      if (this.onReply) await this.onReply(t, id, reply)
+      await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...(this.dialogs.get(key) ?? []), userMsg, assistantMsg].slice(-config.agent.maxHistory)
@@ -294,6 +294,41 @@ export class AgentCore {
       this.emit()
     } catch (err) {
       console.error('[Core] 主动说话错误:', err)
+    }
+  }
+
+  /** 回车分割发送：回复按换行拆成多条，逐条带随机间隔发出（模拟真人打字） */
+  private async sendReplySegmented(t: SceneType, id: number, reply: string): Promise<void> {
+    // 即使没有出站通道（如模拟注入）也打印分段，便于控制台观察节奏
+    const logSeg = (i: number, seg: string): void => {
+      console.log(`[Core] 分段 ${t}:${id} ${i}: ${seg.slice(0, 40)}`)
+    }
+    if (!config.agent.segmentOnNewline) {
+      logSeg(0, reply)
+      if (this.onReply) await this.onReply(t, id, reply)
+      return
+    }
+    const segments = reply.split('\n').map(s => s.trimEnd())
+    let i = 0
+    for (const seg of segments) {
+      const isBlank = seg.trim() === ''
+      if (isBlank && !config.agent.segmentKeepBlank) continue
+      i++
+      // 第一条不额外等间隔（已经过了 cooldown）
+      if (i > 1) {
+        const gap = config.agent.segmentGapMinMs +
+          Math.random() * (config.agent.segmentGapMaxMs - config.agent.segmentGapMinMs)
+        await sleep(Math.round(gap))
+      }
+      if (this.onReply) {
+        if (isBlank) {
+          // 空行也发（作为停顿感）；某些平台不支持空消息则跳过
+          try { await this.onReply(t, id, seg) } catch { /* ignore */ }
+        } else {
+          await this.onReply(t, id, seg)
+        }
+      }
+      logSeg(i, seg)
     }
   }
 

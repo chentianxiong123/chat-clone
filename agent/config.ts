@@ -14,6 +14,14 @@ export const config = {
     temperature: Number(process.env.LLM_TEMPERATURE) || 1.0,
     retryAttempts: Number(process.env.LLM_RETRY_ATTEMPTS) || 3,
     retryDelayMs: Number(process.env.LLM_RETRY_DELAY_MS) || 1000,
+    // ── 计费（元/百万token；空则不计量）──
+    pricePerMIn: Number(process.env.LLM_PRICE_PER_M_IN) || 0,      // 输入价
+    pricePerMOut: Number(process.env.LLM_PRICE_PER_M_OUT) || 0,     // 输出价
+  },
+  // ── Embedding 计费 ────────────────────────────────────────────────────────
+  embed: {
+    // 单次调用价格（元/次）；embed 一般按次数或按字符，先按次计
+    pricePerCall: Number(process.env.EMBED_PRICE_PER_CALL) || 0,
   },
   // ── RAG 检索 ──────────────────────────────────────────────────────────────
   rag: {
@@ -82,6 +90,14 @@ export const config = {
     allowScenes: (process.env.ALLOW_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
     // 黑名单（同格式；白名单优先）
     denyScenes: (process.env.DENY_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
+    // ── 回车分割逐条发送（模拟真人一条条打字发出）──
+    // 回复里每个换行(回车)拆成独立一条消息，逐条带间隔发送
+    segmentOnNewline: process.env.SEGMENT_ON_NEWLINE !== 'false',
+    // 每条消息之间的间隔(ms)（随机在 [min,max] 取，模拟打字节奏）
+    segmentGapMinMs: Number(process.env.SEGMENT_GAP_MIN_MS) || 500,
+    segmentGapMaxMs: Number(process.env.SEGMENT_GAP_MAX_MS) || 1800,
+    // 空行/纯空白行是否也单独成条（默认 false=跳过）
+    segmentKeepBlank: process.env.SEGMENT_KEEP_BLANK === 'true',
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {

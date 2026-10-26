@@ -8,6 +8,14 @@ export interface ChatMessage {
   time?: number
 }
 
+/** 按配置的价格表计算一次调用的费用（元） */
+export function calcLlmCost(tokensIn: number, tokensOut: number): number {
+  const pIn = config.llm.pricePerMIn
+  const pOut = config.llm.pricePerMOut
+  if (!pIn && !pOut) return 0
+  return (tokensIn / 1_000_000) * pIn + (tokensOut / 1_000_000) * pOut
+}
+
 const client = new OpenAI({
   baseURL: config.llm.baseUrl,
   apiKey: config.llm.apiKey,
@@ -35,7 +43,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
         sub: config.llm.model,
         ok: content ? 1 : 0,
         fail: 0,
-        cost: 0,
+        cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
         tokensIn: usage?.prompt_tokens ?? 0,
         tokensOut: usage?.completion_tokens ?? 0,
         ts: Date.now(),
@@ -70,7 +78,7 @@ export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: nu
       sub: config.llm.model,
       ok: 1,
       fail: 0,
-      cost: 0,
+      cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
       tokensIn: usage?.prompt_tokens ?? 0,
       tokensOut: usage?.completion_tokens ?? 0,
       ts: Date.now(),
@@ -125,7 +133,7 @@ export async function embed(text: string): Promise<Float32Array | null> {
       sub: config.rag.embedModel,
       ok: 1,
       fail: 0,
-      cost: 0,
+      cost: config.embed.pricePerCall,
       tokensIn: 0,
       tokensOut: 0,
       ts: Date.now(),
