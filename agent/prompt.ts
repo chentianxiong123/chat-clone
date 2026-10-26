@@ -1,9 +1,13 @@
 import { config } from './config.js'
 import type { RagHit } from './rag.js'
+import type { SceneType } from './core.js'
 
-/** 构建 system prompt: 模板 + ragContext + few-shot 示例 */
-export function buildSystemPrompt(ragContext: string): string {
-  let prompt = config.persona.systemPromptTemplate
+/** 构建 system prompt: 模板(按场景) + ragContext + few-shot 示例 */
+export function buildSystemPrompt(ragContext: string, scene?: SceneType): string {
+  const template = scene === 'private' && config.persona.privateSystemPromptTemplate
+    ? config.persona.privateSystemPromptTemplate
+    : config.persona.systemPromptTemplate
+  let prompt = template
     .replace(/\{name\}/g, config.persona.name)
     .replace(/\{friend\}/g, config.persona.friendName)
     .replace(/\{rag\}/g, ragContext ? `以下聊天记录是本人说过的真实原话，你说话就这味道：\n${ragContext}` : '')

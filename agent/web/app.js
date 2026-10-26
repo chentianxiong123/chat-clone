@@ -86,17 +86,22 @@ function renderState(snap) {
   renderChatFlow()
 }
 
-// ── 群卡片 ──
+// ── 场景卡片 ──
+function batchNFor(g) {
+  return g.scene === 'private' ? (currentSnap?.privateBatchN || 1) : (currentSnap?.batchN || 5)
+}
+
 function renderGroup(g) {
   const tLeft = g.timerDeadlineAt ? Math.max(0, g.timerDeadlineAt - Date.now()) : null
   const timerBadge = tLeft !== null
     ? `<span class="badge badge-sm badge-warning">攒批中 ${fmtSince(tLeft)}</span>`
     : (g.pending.length ? `<span class="badge badge-sm badge-info">待触发</span>` : ``)
-  const batchPct = currentSnap ? Math.min(100, Math.round((g.pending.length / currentSnap.batchN) * 100)) : 0
+  const bn = batchNFor(g)
+  const batchPct = currentSnap ? Math.min(100, Math.round((g.pending.length / bn) * 100)) : 0
   const progressHtml = g.pending.length
     ? `<div class="mt-2">
         <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${currentSnap?.batchN || 5}</span>
+          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${bn}</span>
         </div>
         <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
           <div class="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full transition-all" style="width:${batchPct}%"></div>
@@ -107,6 +112,8 @@ function renderGroup(g) {
     ? `<div class="text-xs text-amber-300/80 mt-1">攒批：
         <span class="font-mono">${esc(g.pending.join(' ').slice(0, 160))}</span></div>`
     : ``
+  const sceneBadge = g.scene === 'private'
+    ? `<span class="badge badge-sm badge-accent">私聊</span>` : ``
   const dialogHtml = g.dialog.length
     ? `<div class="mt-2 space-y-1">${
         g.dialog.map((m) => `
@@ -118,12 +125,15 @@ function renderGroup(g) {
       <div class="text-[10px] text-slate-600 mt-1">记忆 ${g.dialog.length} 条</div>`
     : ``
   return `
-  <div class="glass round-2xl p-4" data-gid="${g.groupId}">
+  <div class="glass round-2xl p-4" data-key="${g.key}">
     <div class="flex items-center justify-between">
-      <div class="font-mono font-semibold">群 ${g.groupId}</div>
+      <div class="flex items-center gap-2">
+        <div class="font-mono font-semibold">${g.title}</div>
+        ${sceneBadge}
+      </div>
       <div class="flex gap-2 items-center">
         ${timerBadge}
-        <button class="btn btn-xs btn-ghost text-error act-clear" title="清空该群记忆">清空</button>
+        <button class="btn btn-xs btn-ghost text-error act-clear" title="清空该场景记忆">清空</button>
         <button class="btn btn-xs btn-primary act-flush">立即触发</button>
       </div>
     </div>
@@ -136,15 +146,15 @@ function renderGroup(g) {
 function bindGroupButtons() {
   document.querySelectorAll('.act-flush').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const gid = btn.closest('[data-gid]').dataset.gid
-      await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) })
+      const key = btn.closest('[data-key]').dataset.key
+      await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
     })
   })
   document.querySelectorAll('.act-clear').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const gid = btn.closest('[data-gid]').dataset.gid
-      if (!confirm(`清空群 ${gid} 的会话记忆？`)) return
-      await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) })
+      const key = btn.closest('[data-key]').dataset.key
+      if (!confirm(`清空场景 ${key} 的会话记忆？`)) return
+      await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
     })
   })
 }
@@ -154,18 +164,27 @@ $('ov-clear-all').addEventListener('click', async () => {
   await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
 })
 
-// ── 聊天流 ──
+// ── 聊天流（支持场景选择）──
+let chatPickKey = null
 function renderChatFlow() {
   if (!currentSnap) return
-  const groups = Object.values(currentSnap.groups)
-  const gid = groups[0]?.groupId
+  const scenes = Object.values(currentSnap.scenes || currentSnap.groups)
+  // 同步场景选择器选项
+  const pick = $('chat-scene-pick')
+  const cur = chatPickKey && scenes.some(s => s.key === chatPickKey) ? chatPickKey : (scenes[0]?.key || null)
+  const opts = scenes.map(s => `<option value="${s.key}">${s.title}</option>`).join('')
+  if (pick.innerHTML !== opts && pick.innerHTML !== `<option value="">${'-- 无 --'}</option>`) {
+    pick.innerHTML = scenes.length ? opts : `<option value="">-- 无 --</option>`
+  }
+  if (cur) pick.value = cur
+  const sc = scenes.find(s => s.key === cur)
   const box = $('chat-flow')
-  $('chat-gid').textContent = gid ? `· 群 ${gid}` : ''
-  if (!gid || !groups[0].dialog.length) {
-    box.innerHTML = `<div class="text-center text-slate-600 text-sm py-8">暂无对话，先在「模拟群消息」注入一条</div>`
+  $('chat-scene-label').textContent = sc ? `· ${sc.title}` : ''
+  if (!sc || !sc.dialog.length) {
+    box.innerHTML = `<div class="text-center text-slate-600 text-sm py-8">暂无对话，先在下面「模拟消息」注入一条</div>`
     return
   }
-  box.innerHTML = groups[0].dialog.map((m) => `
+  box.innerHTML = sc.dialog.map((m) => `
     <div class="flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}">
       <div class="max-w-[80%] round-xl px-4 py-2 text-sm ${m.role === 'user' ? 'bg-slate-800/70 text-sky-200' : 'bg-indigo-600/50 text-emerald-100'}">
         <div class="text-[10px] text-slate-500 mb-1">${m.role === 'user' ? '👤 群友' : '🤖 ' + (currentSnap?.selfName || '我')} · ${m.time ? fmtTime(m.time) : ''}</div>
@@ -174,29 +193,36 @@ function renderChatFlow() {
     </div>`).join('')
   box.scrollTop = box.scrollHeight
 }
+$('chat-scene-pick')?.addEventListener('change', (e) => { chatPickKey = e.target.value; renderChatFlow() })
 
-// ── 聊天页注入 ──
+// ── 聊天页注入（私聊/群聊）──
+function simScene() { return $('sim-scene').value === 'private' ? 'private' : 'group' }
+function simId() { return $('sim-id').value || '10000' }
+
 $('sim-send').addEventListener('click', async () => {
   const text = $('sim-text').value.trim()
   if (!text) return
   const body = {
-    groupId: $('sim-group').value || '10000',
+    scene: simScene(),
+    groupId: simId(),
+    senderId: simId(),
     senderNick: $('sim-who').value || '测试员',
     text,
+    atBot: $('sim-at').checked,
   }
   const r = await fetch('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const res = await r.json()
   $('sim-result').classList.remove('hidden')
-  $('sim-result').textContent = `注入成功 → 群 ${res.groupId}，已进入攒批队列`
+  $('sim-result').textContent = `注入成功 → ${res.scene === 'private' ? '私聊' : '群'} ${res.id}，已进入攒批队列${body.atBot ? '（@bot）' : ''}`
   $('sim-text').value = ''
 })
 $('sim-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sim-send').click() })
 
 $('sim-flush').addEventListener('click', async () => {
-  const gid = $('sim-group').value || '10000'
-  await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) })
+  const key = (simScene() === 'private' ? 'p:' : 'g:') + simId()
+  await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
   $('sim-result').classList.remove('hidden')
-  $('sim-result').textContent = `已触发群 ${gid} 攒批`
+  $('sim-result').textContent = `已触发 ${key} 攒批`
 })
 
 // ── 人设 ──

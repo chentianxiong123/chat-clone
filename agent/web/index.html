@@ -89,10 +89,17 @@
     <!-- ══ 实时聊天 ══ -->
     <section id="page-chat" class="page">
       <div class="glass round-2xl p-5 mb-4">
-        <div class="text-sm font-semibold mb-3">模拟群消息（NapCat 未接时也能测行为）</div>
+        <div class="text-sm font-semibold mb-3">模拟消息（私聊 / 群聊都支持）</div>
         <div class="flex flex-wrap gap-2">
-          <input id="sim-group" class="input input-sm input-bordered w-32" placeholder="群号" value="10000">
+          <select id="sim-scene" class="select select-sm select-bordered w-32">
+            <option value="group">群聊</option>
+            <option value="private">私聊</option>
+          </select>
+          <input id="sim-id" class="input input-sm input-bordered w-32" placeholder="群号/QQ" value="10000">
           <input id="sim-who" class="input input-sm input-bordered w-32" placeholder="昵称" value="测试员">
+          <label class="flex items-center gap-1 text-xs text-slate-400" title="@触发切换？只有勾选群里@你才有动作（测试唤醒）">
+            <input id="sim-at" type="checkbox" class="checkbox checkbox-sm checkbox-primary"> @bot
+          </label>
           <input id="sim-text" class="input input-sm input-bordered flex-1 min-w-48" placeholder="消息内容...">
           <button id="sim-send" class="btn btn-sm btn-primary">注入</button>
           <button id="sim-flush" class="btn btn-sm btn-outline">立即触发攒批</button>
@@ -100,7 +107,12 @@
         <div id="sim-result" class="mt-3 text-xs text-emerald-400 font-mono hidden"></div>
       </div>
       <div class="glass round-2xl p-5">
-        <div class="text-sm font-semibold mb-3">对话流 <span id="chat-gid" class="text-xs text-slate-500 font-mono"></span></div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">对话流 <span id="chat-scene-label" class="text-xs text-slate-500"></span></div>
+          <div>
+            <select id="chat-scene-pick" class="select select-xs select-bordered"></select>
+          </div>
+        </div>
         <div id="chat-flow" class="space-y-2 max-h-[60vh] overflow-y-auto pr-1"></div>
       </div>
     </section>

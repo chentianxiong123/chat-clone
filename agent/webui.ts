@@ -84,6 +84,7 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
           llm: { model: config.llm.model, baseUrl: config.llm.baseUrl, configured: !!config.llm.apiKey },
           batch: { n: config.batch.n, t: config.batch.t },
           persona: config.persona,
+          agent: config.agent,
           ragConfig: {
             dbPath: config.rag.dbPath,
             embedEndpoint: config.rag.embedEndpoint,
@@ -130,27 +131,35 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
       // ── 模拟注入 ──
       if (path === '/api/simulate' && req.method === 'POST') {
         const body = await readBody(req)
-        const gid = Number(body.groupId) || 10000
+        const scene: 'group' | 'private' = body.scene === 'private' ? 'private' : 'group'
+        const id = Number(body.groupId || body.senderId) || 10000
         const who = body.senderNick || '测试员'
         const text = body.text || ''
         if (!text) return json(res, 400, { error: 'empty text' })
-        core.handleMessage({ groupId: gid, senderId: Number(body.senderId) || 999, senderNick: who, text })
-        return json(res, 200, { ok: true, groupId: gid })
+        core.handleMessage({
+          scene,
+          groupId: id,
+          senderId: id,
+          senderNick: who,
+          text,
+          atBot: !!body.atBot,
+        })
+        return json(res, 200, { ok: true, scene, id })
       }
 
       // ── 立即触发攒批 ──
       if (path === '/api/flush' && req.method === 'POST') {
         const body = await readBody(req)
-        const gid = Number(body.groupId)
-        core.flush(gid)
+        const key = body.key || `g:${body.groupId}`
+        core.flush(key)
         return json(res, 200, { ok: true })
       }
 
       // ── 清空会话记忆 ──
       if (path === '/api/clear' && req.method === 'POST') {
         const body = await readBody(req)
-        const gid = body.groupId != null ? Number(body.groupId) : undefined
-        core.clearDialog(gid)
+        const key = body.key ?? undefined
+        core.clearDialog(key)
         return json(res, 200, { ok: true })
       }
 

@@ -37,6 +37,8 @@ export const config = {
   persona: {
     name: process.env.PERSONA_NAME || '崽种',
     friendName: process.env.PERSONA_FRIEND || '朋友',
+    // 群里被这样的词叫时会被唤醒（逗号分隔，命中即视为 @✓）
+    wakeWords: (process.env.PERSONA_WAKE_WORDS || '崽种,qq,机器人').split(',').map(s => s.trim()).filter(Boolean),
     // 系统提示模板({name} / {friend} / {rag} 会被替换)
     systemPromptTemplate: process.env.PERSONA_SYSTEM_PROMPT || `你是{name} 你在群里跟朋友瞎聊
 
@@ -51,8 +53,10 @@ export const config = {
 {rag}`,
     // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
     demoDialogs: process.env.PERSONA_DEMO_DIALOGS || '',
+    // 私聊专用 system prompt 模板（不配则用上面通用模板）
+    privateSystemPromptTemplate: process.env.PERSONA_PRIVATE_SYSTEM_PROMPT || '',
   },
-  // ── 消息处理 ──────────────────────────────────────────────────────────────
+  // ── 消息处理 / 会话场景 ───────────────────────────────────────────────────
   batch: {
     n: Number(process.env.BATCH_N) || 5,
     t: Number(process.env.BATCH_T) || 60_000,
@@ -61,6 +65,23 @@ export const config = {
     maxHistory: Number(process.env.MAX_HISTORY) || 20,
     replyCooldown: Number(process.env.REPLY_COOLDOWN) || 25_000,
     respondMode: process.env.RESPOND_MODE || 'auto', // "auto" | "mention"
+    // 私聊独立策略：攒批条数/时间（默认1条即回，秒回）
+    privateBatchN: Number(process.env.PRIVATE_BATCH_N) || 1,
+    privateBatchT: Number(process.env.PRIVATE_BATCH_T) || 30_000,
+    privateReplyCooldown: Number(process.env.PRIVATE_REPLY_COOLDOWN) || 10_000,
+    // 群聊回复概率 0~1（1=必回，0.5=50%概率沉默，模拟真人不想理）
+    groupReplyProb: Number(process.env.GROUP_REPLY_PROB) || 1.0,
+    // 私聊回复概率
+    privateReplyProb: Number(process.env.PRIVATE_REPLY_PROB) || 1.0,
+    // 调整后 min(max(x,0),1)
+    // 主动说话：某个场景沉寂 minGapMs 后主动冒泡（0=关闭）
+    proactiveGapMs: Number(process.env.PROACTIVE_GAP_MS) || 0,
+    // 夜间防打扰 [hh:mm–hh:mm] 不响（空串=关闭）
+    quietHours: process.env.QUIET_HOURS || '',
+    // 只处理白名单（空=全部；格式逗号分隔，g:群号 / p:QQ号 或裸群号）
+    allowScenes: (process.env.ALLOW_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
+    // 黑名单（同格式；白名单优先）
+    denyScenes: (process.env.DENY_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {
