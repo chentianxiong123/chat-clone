@@ -85,11 +85,11 @@ body {
 .round-xl { border-radius: 12px; }
 .round-2xl, .round-xl, .glass { box-shadow: 0 4px 24px rgba(0,0,0,.25); }
 
-/* ── 总览 Hero ── */
-.hero { padding: 8px 0 20px; }
-.hero-title { font-size: 2rem; font-weight: 800; margin-bottom: 4px; }
+/* ── 总览 Hero 横幅 ── */
+.hero-banner { padding: 8px 0 20px; }
+.hero-title { font-size: 2rem; font-weight: 800; line-height: 1.2; margin: 0; }
 .hero-emoji { display: inline-block; }
-.hero-sub { color: #94a3b8; font-size: .95rem; }
+.hero-sub { color: #94a3b8; font-size: .95rem; margin: 6px 0 0; }
 
 /* ── 统计卡片（AstrBot 式大图标卡片）── */
 .stat-card { background: var(--glass); border: 1px solid var(--border); border-radius: 18px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,.25); }
