@@ -56,6 +56,14 @@ export interface MinedStats {
   hourRatio: number[]
   /** 对方一轮（连发合并）被本人在 5 分钟内回复的比例 */
   replyRate: number
+  /** 经验反应延迟桶（毫秒上限 + 权重） */
+  reactBuckets: { upToMs: number; weight: number }[]
+  /** 24 小时绝对回复率（样本不足的小时用整体率） */
+  hourlyReply: number[]
+  /** 对话状态回复率（距上次本人发言 <1min / 1-5min / 5-30min / >30min） */
+  stateReply: { active: number; semi: number; cold: number; veryCold: number }
+  /** 对方连发 1-2 条 / 10+ 条的回复率（用于长连发惩罚） */
+  batchReply: { short: number; long: number }
   totalText: number
   selfText: number
 }
@@ -123,7 +131,7 @@ function drowsyRanges(
  */
 export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverride {
   const lat = stats.replyLatencySec
-  const reactMin = clamp(Math.round(safe(lat.p10) * 1000), 2000, 6000)
+  const reactMin = clamp(Math.round(safe(lat.p10) * 1000), 1500, 6000)
   const reactMax = clamp(Math.round(safe(lat.p90) * 1000), reactMin + 2000, 20000)
 
   const cps = clamp(safe(stats.typingCps), 2, 8)
@@ -134,9 +142,19 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
   const segMax = clamp(Math.round(safe(stats.burstGapSec.p75) * 1000), segMin + 300, 15000)
   const maxSeg = clamp(Math.round(safe(stats.burstLen.p90)), 2, 6)
   const maxChars = clamp(Math.round(safe(stats.turnChars.p90) * 1.2), 60, 240)
+  const maxSegmentChars = clamp(Math.round(safe(stats.selfMsgChars.p95)), 8, 30)
+
+  const overall = safe(stats.replyRate, 0.9) || 0.9
+  const hourly = (stats.hourlyReply.length === 24 ? stats.hourlyReply : []).map(r =>
+    round2(clamp(safe(r, overall) / overall, 0.2, 1.05)),
+  )
+  const batchFactor =
+    stats.batchReply.short > 0
+      ? clamp(stats.batchReply.long / stats.batchReply.short, 0.5, 1)
+      : 0.85
 
   return {
-    react: { minMs: reactMin, maxMs: reactMax },
+    react: { minMs: reactMin, maxMs: reactMax, distribution: stats.reactBuckets },
     typing: {
       charsPerSec: { min: cpsMin, max: cpsMax },
       segGap: { minMs: segMin, maxMs: segMax },
@@ -144,6 +162,7 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
     },
     style: {
       maxChars,
+      maxSegmentChars,
       emojiProb: round2(clamp(safe(stats.emojiRate) * 1.5, 0.01, 0.2)),
       emojis: stats.emojis.slice(0, 6),
       fillerProb: round2(clamp(safe(stats.shortRate) * 0.8, 0, 0.35)),
@@ -153,9 +172,80 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
       quietHours: longestLowBlock(stats.hourRatio, 0.03),
       drowsy: drowsyRanges(stats.hourRatio, 0.03, 0.2),
     },
-    replyProb: { group: round2(clamp(safe(stats.replyRate), 0.25, 0.95)) },
+    replyProb: {
+      group: round2(clamp(overall, 0.25, 0.95)),
+      state: {
+        enabled: true,
+        applyToPrivate: false,
+        activeWithinMs: 60_000,
+        active: round2(clamp(safe(stats.stateReply.active, 0.95), 0.3, 1)),
+        semiWithinMs: 300_000,
+        semi: round2(clamp(safe(stats.stateReply.semi, 0.85), 0.25, 1)),
+        coldWithinMs: 1_800_000,
+        cold: round2(clamp(safe(stats.stateReply.cold, 0.6), 0.2, 1)),
+        veryCold: round2(clamp(safe(stats.stateReply.veryCold, 0.54), 0.2, 1)),
+      },
+      hourly,
+      batchPenalty: { threshold: 10, factor: round2(batchFactor) },
+    },
     burst: { maxReplies: clamp(Math.round(safe(stats.burstLen.p90)), 2, 6) },
   }
+}
+
+/** 按对话状态取回复概率（elapsedMs=距上次本人发言；fallback=state 关闭时用） */
+export function stateReplyProb(elapsedMs: number, fallback: number): number {
+  const st = config.humanlike.replyProb.state
+  if (!st.enabled) return fallback
+  if (elapsedMs <= st.activeWithinMs) return st.active
+  if (elapsedMs <= st.semiWithinMs) return st.semi
+  if (elapsedMs <= st.coldWithinMs) return st.cold
+  return st.veryCold
+}
+
+/** 按经验分布采样一次反应延迟（毫秒），无分布时退回均匀 min~max */
+export function sampleReactMs(): number {
+  const r = config.humanlike.react
+  const dist = r.distribution
+  if (!dist.length) return Math.round(r.minMs + Math.random() * Math.max(0, r.maxMs - r.minMs))
+  const total = dist.reduce((s, d) => s + d.weight, 0)
+  if (total <= 0) return Math.round(r.minMs)
+  let x = Math.random() * total
+  let prev = r.minMs
+  for (const d of dist) {
+    if (x <= d.weight) {
+      const lo = Math.min(Math.max(prev, r.minMs), r.maxMs)
+      const hi = Math.max(lo, Math.min(d.upToMs, r.maxMs))
+      return Math.round(lo + Math.random() * (hi - lo))
+    }
+    x -= d.weight
+    prev = Math.max(prev, d.upToMs)
+  }
+  return Math.round(r.maxMs)
+}
+
+/** 超长单条在标点/空格处再拆，避免一条发一大段（按码点，不会切坏 emoji） */
+export function splitLongSegment(line: string, maxChars: number): string[] {
+  if (maxChars <= 0) return [line]
+  const chars = [...line]
+  if (chars.length <= maxChars) return [line]
+  const out: string[] = []
+  let start = 0
+  while (start < chars.length) {
+    let end = Math.min(start + maxChars, chars.length)
+    if (end < chars.length) {
+      // 回退到窗口内最后一个标点/空格，尽量不切在词中间
+      for (let i = end - 1; i > start + Math.floor(maxChars / 2); i--) {
+        if (/[，。！？、；：,.!?;:\s]/.test(chars[i])) {
+          end = i + 1
+          break
+        }
+      }
+    }
+    const seg = chars.slice(start, end).join('').trim()
+    if (seg) out.push(seg)
+    start = end
+  }
+  return out.length ? out : [line]
 }
 
 // ── 工具 ────────────────────────────────────────────────────────────────────

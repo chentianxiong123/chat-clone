@@ -135,24 +135,78 @@ function computeStats(msgs: Msg[]): MinedStats & { sample: Record<string, number
   }
   latencySec.sort((a, b) => a - b)
 
-  // 对方一轮（连发合并）是否在 5 分钟内被回复
+  // 对方一轮（连发合并）是否在 5 分钟内被回复；同时按小时/对话状态/连发长度分组
   let otherBursts = 0
   let repliedBursts = 0
+  const hourN = new Array(24).fill(0) as number[]
+  const hourR = new Array(24).fill(0) as number[]
+  const stateN = { active: 0, semi: 0, cold: 0, veryCold: 0 }
+  const stateR = { active: 0, semi: 0, cold: 0, veryCold: 0 }
+  const batchShort = { n: 0, r: 0 }
+  const batchLong = { n: 0, r: 0 }
+  let lastSelfTs: number | null = null
   for (let i = 0; i < msgs.length; i++) {
-    if (msgs[i].self) continue
+    if (msgs[i].self) {
+      lastSelfTs = msgs[i].ts
+      continue
+    }
     let j = i
     while (j + 1 < msgs.length && !msgs[j + 1].self && msgs[j + 1].ts - msgs[j].ts <= BURST_GAP_MS) j++
     otherBursts++
     const endTs = msgs[j].ts
+    let ok = false
     let k = j + 1
     while (k < msgs.length && msgs[k].ts - endTs <= REPLY_WINDOW_MS) {
       if (msgs[k].self) {
+        ok = true
         repliedBursts++
         break
       }
       k++
     }
+    const h = new Date(endTs).getHours()
+    hourN[h]++
+    if (ok) hourR[h]++
+
+    const gap = lastSelfTs === null ? Number.POSITIVE_INFINITY : msgs[i].ts - lastSelfTs
+    const sk: keyof typeof stateN =
+      gap <= 60_000 ? 'active' : gap <= 300_000 ? 'semi' : gap <= 1_800_000 ? 'cold' : 'veryCold'
+    stateN[sk]++
+    if (ok) stateR[sk]++
+
+    const n = j - i + 1
+    if (n <= 2) {
+      batchShort.n++
+      if (ok) batchShort.r++
+    } else if (n >= 10) {
+      batchLong.n++
+      if (ok) batchLong.r++
+    }
     i = j
+  }
+
+  // 经验反应延迟桶（0-1s 并入 <2s；采样时下限由 react.minMs 兜住，保证不秒回）
+  const reactBuckets: { upToMs: number; weight: number }[] = []
+  let prevCount = 0
+  for (const cap of [2, 3, 5, 10, 30, 60, 300]) {
+    const count = latencySec.filter(s => s < cap).length
+    const weight = count - prevCount
+    if (weight > 0) reactBuckets.push({ upToMs: cap * 1000, weight })
+    prevCount = count
+  }
+
+  const overallRate = otherBursts ? repliedBursts / otherBursts : 0
+  const hourlyReply = hourN.map((n, h) => (n >= 30 ? hourR[h] / n : overallRate))
+  const rateOf = (n: number, r: number) => (n ? r / n : overallRate)
+  const stateReply = {
+    active: rateOf(stateN.active, stateR.active),
+    semi: rateOf(stateN.semi, stateR.semi),
+    cold: rateOf(stateN.cold, stateR.cold),
+    veryCold: rateOf(stateN.veryCold, stateR.veryCold),
+  }
+  const batchReply = {
+    short: rateOf(batchShort.n, batchShort.r),
+    long: rateOf(batchLong.n, batchLong.r),
   }
 
   // emoji / 短句 / 口头语
@@ -223,7 +277,19 @@ function computeStats(msgs: Msg[]): MinedStats & { sample: Record<string, number
     shortRate: round2(selfMsgs.length ? shortMsgs / selfMsgs.length : 0),
     fillers,
     hourRatio,
-    replyRate: round2(otherBursts ? repliedBursts / otherBursts : 0),
+    replyRate: round2(overallRate),
+    reactBuckets,
+    hourlyReply: hourlyReply.map(round2),
+    stateReply: {
+      active: round2(stateReply.active),
+      semi: round2(stateReply.semi),
+      cold: round2(stateReply.cold),
+      veryCold: round2(stateReply.veryCold),
+    },
+    batchReply: {
+      short: round2(batchReply.short),
+      long: round2(batchReply.long),
+    },
     totalText: msgs.length,
     selfText: selfMsgs.length,
   }

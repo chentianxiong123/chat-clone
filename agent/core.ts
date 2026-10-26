@@ -2,7 +2,7 @@ import { config } from './config.js'
 import { callLlm, type ChatMessage } from './llm.js'
 import { searchRag } from './rag.js'
 import { buildSystemPrompt, buildRagContextMessage } from './prompt.js'
-import { applyStyle } from './profile.js'
+import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
   loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
@@ -141,11 +141,13 @@ function needWake(t: SceneType, msg: InjectedMessage): boolean {
 }
 
 export class AgentCore {
-  private pending = new Map<SceneKey, { lines: string[] }>()
+  private pending = new Map<SceneKey, { lines: string[]; woke?: boolean }>()
   private dialogs = new Map<SceneKey, ChatMessage[]>()
   private timers = new Map<SceneKey, { handle: ReturnType<typeof setTimeout>; deadlineAt: number }>()
   private lastReplyAt = 0
   private lastActiveAt = 0
+  /** 每个场景最后一次本人发言时间（对话状态用：热聊/冷场） */
+  private lastSelfAt = new Map<SceneKey, number>()
   /** 近期回复时间戳（刷屏抑制 / burst 用） */
   private replyHistory: number[] = []
   private listeners = new Set<Listener>()
@@ -179,6 +181,7 @@ export class AgentCore {
 
     const p = paramFor(t)
     const woke = !needWake(t, msg)
+    g.woke = g.woke || (t === 'group' && woke)
 
     // 敷衍短消息忽略（真人经常"好的""嗯"当没看见）
     const ignore = config.humanlike.ignoreShort
@@ -229,6 +232,27 @@ export class AgentCore {
     this.emit()
   }
 
+  /** 综合对话状态 / 分时段 / 连发长度 / 唤醒 计算本轮回复概率 */
+  private effectiveReplyProb(key: SceneKey, t: SceneType, batchSize: number, woke: boolean): number {
+    const rp = config.humanlike.replyProb
+    const base = t === 'private' ? rp.private : rp.group
+    let p = base
+    const st = rp.state
+    if (st.enabled && (t === 'group' || st.applyToPrivate)) {
+      const last = this.lastSelfAt.get(key)
+      // 进程刚启动视为"刚说过话"，避免一上来就冷场；之后按真实静默时长衰减
+      const elapsed = last ? Date.now() - last : 0
+      p = stateReplyProb(elapsed, base)
+    }
+    if (t === 'group' && rp.hourly.length === 24) {
+      p *= rp.hourly[new Date().getHours()]
+    }
+    if (batchSize >= rp.batchPenalty.threshold) p *= rp.batchPenalty.factor
+    // 群聊被 @ / 叫名字：必回（状态/时段/连发惩罚都不打折）
+    if (woke && t === 'group') p = 1
+    return Math.max(0, Math.min(1, p))
+  }
+
   // ── 触发一轮回复 ──────────────────────────────────────────────────────
 
   async flush(key: SceneKey): Promise<void> {
@@ -247,9 +271,10 @@ export class AgentCore {
     console.log(`[Core] 触发 ${key}: 共 ${g.lines.length} 条`)
 
     try {
-      // 回复概率：不是每条都回（模拟真人）
-      if (p.replyProb < 1 && Math.random() > p.replyProb) {
-        console.log(`[Core] ${key} 概率沉默（replyProb=${p.replyProb}）`)
+      // 回复概率：对话状态 + 分时段 + 连发长度（模拟真人；被点名必回）
+      const prob = this.effectiveReplyProb(key, t, g.lines.length, !!g.woke)
+      if (prob < 1 && Math.random() > prob) {
+        console.log(`[Core] ${key} 概率沉默（replyProb=${prob.toFixed(2)}）`)
         this.emit()
         return
       }
@@ -268,9 +293,7 @@ export class AgentCore {
       ]
 
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
-      const reactMs = config.humanlike.react.minMs +
-        Math.random() * (config.humanlike.react.maxMs - config.humanlike.react.minMs)
-      await sleep(Math.round(reactMs))
+      await sleep(sampleReactMs())
 
       const raw = await callLlm(messages)
       if (!raw) {
@@ -292,6 +315,7 @@ export class AgentCore {
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
+      this.lastSelfAt.set(key, Date.now())
       this.noteReply()
       recordGroupReply(id)
       this.emit()
@@ -335,9 +359,7 @@ export class AgentCore {
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...hist, ...(ragMsg ? [ragMsg] : []), userMsg]
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
-      const reactMs = config.humanlike.react.minMs +
-        Math.random() * (config.humanlike.react.maxMs - config.humanlike.react.minMs)
-      await sleep(Math.round(reactMs))
+      await sleep(sampleReactMs())
       const raw = await callLlm(messages)
       if (!raw) return
       const reply = applyStyle(raw, lastMsg)
@@ -345,6 +367,7 @@ export class AgentCore {
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
+      this.lastSelfAt.set(key, Date.now())
       this.noteReply()
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...(await this.dialogFor(key)), userMsg, assistantMsg].slice(-config.agent.maxHistory)
@@ -411,8 +434,10 @@ export class AgentCore {
       if (this.onReply) await this.onReply(t, id, reply)
       return
     }
-    // 拆条 + 限制最多拆几条（超出部分合并到末尾，避免狂刷几十条）
+    // 拆条 + 超长单条再拆 + 限制最多拆几条（超出部分合并到末尾，避免狂刷几十条）
     let segments = reply.split('\n').map(s => s.trimEnd())
+    const maxSegChars = config.humanlike.style.maxSegmentChars
+    if (maxSegChars > 0) segments = segments.flatMap(s => splitLongSegment(s, maxSegChars))
     if (ty.maxSegments > 0 && segments.length > ty.maxSegments) {
       const head = segments.slice(0, ty.maxSegments - 1)
       const tail = segments.slice(ty.maxSegments - 1).filter(s => s.trim() !== '')

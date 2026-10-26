@@ -5,6 +5,35 @@ import { loadMinedProfile } from './stats.js'
 
 function clamp01(x: number): number { return Math.min(1, Math.max(0, x)) }
 
+/** 读数字环境变量（0 是合法值，不用 || 兜底） */
+function envNum(name: string, def: number): number {
+  const v = process.env[name]
+  if (v === undefined || v === '') return def
+  const n = Number(v)
+  return Number.isFinite(n) ? n : def
+}
+
+/** "0.5,0.7,..." → number[] */
+function parseNumList(raw?: string): number[] {
+  return (raw || '').split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n))
+}
+
+/** "2000:28,3000:16,..." → [{upToMs,weight}]，按上限升序 */
+function parseReactDist(raw?: string): { upToMs: number; weight: number }[] {
+  return (raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => {
+      const [a, b] = s.split(':')
+      const upToMs = Number(a)
+      const weight = Number(b)
+      return Number.isFinite(upToMs) && Number.isFinite(weight) && weight > 0 ? { upToMs, weight } : null
+    })
+    .filter((x): x is { upToMs: number; weight: number } => !!x)
+    .sort((a, b) => a.upToMs - b.upToMs)
+}
+
 /** 解析半醒时段："23:00-00:30@0.5,02:00-06:00@0.8" → [{start,end,dormantProb}] */
 function parseDrowsy(raw: string): { start: string; end: string; prob: number }[] {
   return raw.split(',').map(s => s.trim()).filter(Boolean).map(s => {
@@ -118,6 +147,25 @@ export const config = {
       // 群聊被点名+正常消息；被 @/唤醒时必应（不打折扣）
       group: clamp01(Number(process.env.GROUP_REPLY_PROB) || 1.0),
       private: clamp01(Number(process.env.PRIVATE_REPLY_PROB) || 1.0),
+      // 对话状态：距上次本人发言越久，越可能不回（数据：热聊99% / 半热74% / 冷47% / 很冷39%）
+      state: {
+        enabled: process.env.HL_STATE_ENABLED !== 'false',
+        applyToPrivate: process.env.HL_STATE_PRIVATE === 'true',
+        activeWithinMs: envNum('HL_STATE_ACTIVE_WITHIN_MS', 60_000),
+        active: clamp01(envNum('HL_STATE_ACTIVE_PROB', 0.99)),
+        semiWithinMs: envNum('HL_STATE_SEMI_WITHIN_MS', 300_000),
+        semi: clamp01(envNum('HL_STATE_SEMI_PROB', 0.74)),
+        coldWithinMs: envNum('HL_STATE_COLD_WITHIN_MS', 1_800_000),
+        cold: clamp01(envNum('HL_STATE_COLD_PROB', 0.47)),
+        veryCold: clamp01(envNum('HL_STATE_VERY_COLD_PROB', 0.39)),
+      },
+      // 分时段乘数（24 个，空=不启用；主要压低早晨 07-09）
+      hourly: parseNumList(process.env.HL_REPLY_HOURLY),
+      // 对方一次发太多条 → 回复概率打折
+      batchPenalty: {
+        threshold: envNum('HL_BATCH_PENALTY_FROM', 10),
+        factor: clamp01(envNum('HL_BATCH_PENALTY_FACTOR', 0.85)),
+      },
     },
     // 太短的敷衍消息直接忽略（如"好的""嗯"），真人常当没看见
     ignoreShort: {
@@ -128,6 +176,8 @@ export const config = {
     react: {
       minMs: Number(process.env.REPLY_REACT_MIN_MS) || 2500,
       maxMs: Number(process.env.REPLY_REACT_MAX_MS) || 8000,
+      // 经验延迟分布（按权重采样，空=min~max 均匀）；数据：29% 在2s内、67% 在5s内
+      distribution: parseReactDist(process.env.HL_REACT_DIST),
     },
     cooldown: {
       groupMs: Number(process.env.REPLY_COOLDOWN) || 25_000,
@@ -164,6 +214,8 @@ export const config = {
     style: {
       // 回复超长自动收敛（防小作文），超出的在句子边界截断+省略号
       maxChars: Number(process.env.HL_STYLE_MAX_CHARS) || 120,
+      // 单条消息字数上限（0=关；超长优先在标点处再拆一条）
+      maxSegmentChars: envNum('HL_MAX_SEGMENT_CHARS', 0),
       // 句尾偶发表情
       emojiProb: clamp01(Number(process.env.HL_STYLE_EMOJI_PROB) || 0.15),
       emojis: (process.env.HL_STYLE_EMOJIS || '😂,😅,🤔,😏,🤤,💦').split(',').map(s => s.trim()).filter(Boolean),

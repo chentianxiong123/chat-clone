@@ -473,6 +473,13 @@ function renderActiveConfig(cfg, rag, profileMeta) {
     style: { maxChars: 0, emojiProb: 0, fillerProb: 0, typoProb: 0 },
     schedule: { quietHours: '', drowsy: [], proactiveGapMs: 0 },
   }
+  const st = hl.replyProb.state || { active: 0, semi: 0, cold: 0, veryCold: 0 }
+  const hourly = hl.replyProb.hourly || []
+  const bp = hl.replyProb.batchPenalty || { threshold: 0, factor: 1 }
+  const pct = (v) => `${Math.round((v || 0) * 100)}%`
+  const bars = hourly.length === 24
+    ? hourly.map((v, i) => `<div title="${String(i).padStart(2, '0')}:00 ${pct(v)}" style="flex:1;height:${Math.min(100, Math.max(6, Math.round(v * 100)))}%;background:rgba(56,189,248,.55);border-radius:1px"></div>`).join('')
+    : ''
   panels.innerHTML = `
     <div class="grid grid-cols-2 gap-3 text-xs">
       <div class="glass p-3 round-xl">
@@ -497,8 +504,13 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">拟人 · 反应</div>
-        <div class="font-mono">${(hl.react.minMs/1000).toFixed(1)}~${(hl.react.maxMs/1000).toFixed(1)}s</div>
-        <div class="text-slate-600">回复率 群${(hl.replyProb.group*100).toFixed(0)}% / 私${(hl.replyProb.private*100).toFixed(0)}%</div>
+        <div class="font-mono">${(hl.react.minMs/1000).toFixed(1)}~${(hl.react.maxMs/1000).toFixed(1)}s · ${(hl.react.distribution||[]).length ? '经验分布' : '均匀'}</div>
+        <div class="text-slate-600">热聊${pct(st.active)} 半热${pct(st.semi)} 冷${pct(st.cold)} 很冷${pct(st.veryCold)}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">分时段回复</div>
+        <div style="display:flex;align-items:flex-end;gap:2px;height:26px">${bars || '<span class="text-slate-600">未导入</span>'}</div>
+        <div class="text-slate-600">07 ${pct(hourly[7])} · 08 ${pct(hourly[8])} · 09 ${pct(hourly[9])} · 连发≥${bp.threshold} ×${bp.factor}</div>
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">拟人 · 打字</div>
@@ -507,7 +519,7 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">拟人 · 风格</div>
-        <div class="font-mono">≤${hl.style.maxChars}字</div>
+        <div class="font-mono">整段≤${hl.style.maxChars}字 · 单条${hl.style.maxSegmentChars ? '≤'+hl.style.maxSegmentChars+'字' : '不限'}</div>
         <div class="text-slate-600">表情${(hl.style.emojiProb*100).toFixed(0)}% 语气词${(hl.style.fillerProb*100).toFixed(0)}% 错字${(hl.style.typoProb*100).toFixed(0)}%</div>
       </div>
       <div class="glass p-3 round-xl">
