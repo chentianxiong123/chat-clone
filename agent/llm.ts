@@ -20,6 +20,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
   const attempts = config.llm.retryAttempts
 
   for (let attempt = 0; attempt < attempts; attempt++) {
+    const t0 = Date.now()
     try {
       const resp = await client.chat.completions.create({
         model: config.llm.model,
@@ -38,12 +39,13 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
         tokensIn: usage?.prompt_tokens ?? 0,
         tokensOut: usage?.completion_tokens ?? 0,
         ts: Date.now(),
+        durationMs: Date.now() - t0,
       })
       if (content) return content.trim()
       console.warn(`[LLM] 重试 ${attempt + 1}/${attempts}: 空响应`)
       await sleep(config.llm.retryDelayMs)
     } catch (e) {
-      recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+      recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now(), durationMs: Date.now() - t0 })
       console.warn(`[LLM] 重试 ${attempt + 1}/${attempts}: ${(e as Error).message}`)
       await sleep(config.llm.retryDelayMs)
     }
@@ -53,6 +55,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
 
 /** 直接调用（WebUI 手测 LLM 用），返回完整响应或错误信息 */
 export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: number): Promise<{ ok: boolean; text?: string; error?: string; usage?: { prompt_tokens: number; completion_tokens: number } }> {
+  const t0 = Date.now()
   try {
     const resp = await client.chat.completions.create({
       model: config.llm.model,
@@ -71,11 +74,12 @@ export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: nu
       tokensIn: usage?.prompt_tokens ?? 0,
       tokensOut: usage?.completion_tokens ?? 0,
       ts: Date.now(),
+      durationMs: Date.now() - t0,
     })
     if (content) return { ok: true, text: content.trim(), usage }
     return { ok: true, text: '', usage }
   } catch (e) {
-    recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+    recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now(), durationMs: Date.now() - t0 })
     return { ok: false, error: (e as Error).message }
   }
 }

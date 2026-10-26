@@ -3,177 +3,228 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>chat-clone Agent 控制台</title>
+<title>chat-clone · Agent 控制台</title>
 <link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 <link rel="stylesheet" href="/web/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 </head>
 <body>
 <div class="bg-grid"></div>
-<div class="page">
 
-<header class="hdr fade-in">
-  <div class="hdr-left">
+<div class="shell">
+  <!-- ══ 左侧导航栏（AstrBot 式）══ -->
+  <aside class="sidebar fade-in">
     <div class="logo">🤖</div>
-    <div>
-      <h1><span class="gradient">chat-clone</span> · Agent 控制台</h1>
-      <p id="subtitle" class="text-xs text-slate-500">加载中...</p>
+    <div class="side-nav">
+      <button class="side-item active" data-page="overview" title="总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z"/></svg><span>总览</span></button>
+      <button class="side-item" data-page="chat" title="实时聊天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2.5-2.5A8 8 0 1 1 21 12z"/></svg><span>聊天</span></button>
+      <button class="side-item" data-page="persona" title="人设"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg><span>人设</span></button>
+      <button class="side-item" data-page="kb" title="知识库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2zM4 19a2 2 0 0 0 2 2h14"/></svg><span>知识库</span></button>
+      <button class="side-item" data-page="stats" title="统计"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 4-8"/></svg><span>统计</span></button>
+      <button class="side-item" data-page="logs" title="日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>日志</span></button>
+      <button class="side-item" data-page="config" title="配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1l2.1-2.1M17 7l2.1-2.1"/></svg><span>配置</span></button>
     </div>
-  </div>
-  <div class="hdr-right">
-    <div class="status-pill">
-      <div class="pulse-dot" id="conn-dot"></div>
-      <span id="conn-text" class="text-xs text-slate-400">NapCat --</span>
+    <div class="side-footer">
+      <span id="conn-dot" class="pulse-dot dead"></span>
+      <span id="conn-text" class="text-[10px] text-slate-500">NapCat --</span>
     </div>
-    <span id="rag-badge" class="stat-tag">RAG --</span>
-  </div>
-</header>
+  </aside>
 
-<nav class="tabs fade-in">
-  <button class="tab active" data-tab="overview">状态</button>
-  <button class="tab" data-tab="simulate">调试台</button>
-  <button class="tab" data-tab="rag">RAG 检索</button>
-  <button class="tab" data-tab="llm">手测 LLM</button>
-  <button class="tab" data-tab="config">配置</button>
-  <button class="tab" data-tab="stats">用量</button>
-  <button class="tab" data-tab="logs">日志</button>
-</nav>
-
-<!-- ══ 状态 ══ -->
-<section id="tab-overview" class="tab-panel active">
-  <div class="grid md:grid-cols-3 gap-4">
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">攒批参数</div>
-      <div id="batch-info" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs text-slate-500 mt-2">冷却剩余 <span id="cooldown" class="font-mono text-indigo-400">--</span></div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">活跃群</div>
-      <div id="group-count" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs text-slate-500 mt-2">上次回复 <span id="last-reply" class="font-mono text-indigo-400">--</span></div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="flex items-center justify-between">
-        <div class="text-xs text-slate-500 uppercase">会话记忆</div>
-        <button id="clear-all" class="btn btn-xs btn-ghost text-error" title="清空所有群的会话记忆">清空全部</button>
+  <!-- ══ 主区域 ══ -->
+  <main class="main">
+    <header class="topbar fade-in">
+      <div class="flex items-center gap-3">
+        <span class="gradient font-semibold">chat-clone</span>
+        <span class="text-xs text-slate-500 hidden sm:inline">· Agent 控制台</span>
       </div>
-      <div id="dialog-total" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs text-slate-500 mt-2">对话表总消息数</div>
-    </div>
-  </div>
+      <div class="flex items-center gap-3">
+        <span id="rag-badge" class="stat-tag">RAG --</span>
+        <span id="footer-time" class="text-xs font-mono text-slate-500"></span>
+      </div>
+    </header>
 
-  <div id="group-list" class="mt-4 space-y-3"></div>
-</section>
+    <!-- ══ 总览 ══ -->
+    <section id="page-overview" class="page active">
+      <div class="hero fade-in">
+        <h1 class="hero-title"><span id="greet"></span> <span id="hero-emoji" class="hero-emoji"></span></h1>
+        <p class="hero-sub">我是 <span id="ov-selfname" class="font-mono text-indigo-400">--</span>，群里那个经常消失的崽种。</p>
+      </div>
 
-<!-- ══ 调试台 ══ -->
-<section id="tab-simulate" class="tab-panel">
-  <div class="glass round-2xl p-5 mb-4">
-    <div class="text-sm font-semibold mb-3">模拟群消息（NapCat 未接时也能测行为）</div>
-    <div class="flex flex-wrap gap-2">
-      <input id="sim-group" class="input input-sm input-bordered w-32" placeholder="群号" value="10000">
-      <input id="sim-who" class="input input-sm input-bordered w-32" placeholder="昵称" value="测试员">
-      <input id="sim-text" class="input input-sm input-bordered flex-1 min-w-48" placeholder="消息内容...">
-      <button id="sim-send" class="btn btn-sm btn-primary">注入</button>
-      <button id="sim-flush" class="btn btn-sm btn-outline">立即触发攒批</button>
-    </div>
-    <div id="sim-result" class="mt-3 text-xs text-emerald-400 font-mono hidden"></div>
-  </div>
-  <div id="sim-dialog" class="mt-3 space-y-2"></div>
-</section>
+      <div class="grid md:grid-cols-4 gap-4">
+        <div class="glass round-2xl p-5 stat-card">
+          <div class="stat-label">连接状态</div>
+          <div id="ov-conn" class="stat-value">--</div>
+          <div class="stat-note" id="ov-conn-note">未接入 NapCat 适配器</div>
+        </div>
+        <div class="glass round-2xl p-5 stat-card">
+          <div class="stat-label">活跃群</div>
+          <div id="ov-groups" class="stat-value">0</div>
+          <div class="stat-note">上次回复 <span id="ov-last-reply" class="font-mono">--</span></div>
+        </div>
+        <div class="glass round-2xl p-5 stat-card">
+          <div class="stat-label">会话记忆</div>
+          <div id="ov-dialog" class="stat-value">0</div>
+          <div class="stat-note">攒批 N=<span id="ov-batch-n">--</span> / T=<span id="ov-batch-t">--</span>s</div>
+        </div>
+        <div class="glass round-2xl p-5 stat-card">
+          <div class="stat-label">冷却倒计时</div>
+          <div id="ov-cooldown" class="stat-value">就绪</div>
+          <div class="stat-note" id="ov-mode-note">--</div>
+        </div>
+      </div>
 
-<!-- ══ RAG ══ -->
-<section id="tab-rag" class="tab-panel">
-  <div class="glass round-2xl p-5 mb-4">
-    <div class="text-sm font-semibold mb-3">RAG 双路检索测试（向量 vec0 + FTS5 + LIKE）</div>
-    <div class="flex gap-2">
-      <input id="rag-q" class="input input-sm input-bordered flex-1" placeholder="查询内容，如：nmsl / 你妈炸了 / 今天吃什么">
-      <button id="rag-go" class="btn btn-sm btn-primary">检索</button>
-    </div>
-    <div id="rag-meta" class="mt-2 text-xs text-slate-500"></div>
-  </div>
-  <div id="rag-results" class="mt-3 grid md:grid-cols-3 gap-4"></div>
-</section>
+      <div class="glass round-2xl p-5 mt-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">活跃群</div>
+          <div class="flex gap-2">
+            <button class="btn btn-xs btn-ghost text-error" id="ov-clear-all">清空全部记忆</button>
+          </div>
+        </div>
+        <div id="group-list" class="space-y-3"></div>
+      </div>
+    </section>
 
-<!-- ══ 手测 LLM ══ -->
-<section id="tab-llm" class="tab-panel">
-  <div class="glass round-2xl p-5">
-    <div class="text-sm font-semibold mb-3">手测 LLM（走完整 system + 可选 RAG）</div>
-    <div class="flex flex-wrap items-center gap-3">
-      <label class="flex items-center gap-1 text-xs text-slate-400">
-        <input id="llm-rag" type="checkbox" class="checkbox checkbox-sm checkbox-primary" checked>
-        注入 RAG
-      </label>
-      <select id="llm-model" class="select select-sm select-bordered text-xs"></select>
-      <button id="llm-go" class="btn btn-sm btn-primary ml-auto">发送</button>
-    </div>
-    <textarea id="llm-prompt" class="textarea textarea-bordered w-full mt-3 h-28" placeholder="对 agent 说点什么..."></textarea>
-    <div id="llm-out" class="mt-3 text-sm whitespace-pre-wrap glass round-xl p-4 hidden"></div>
-  </div>
-</section>
+    <!-- ══ 实时聊天 ══ -->
+    <section id="page-chat" class="page">
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="text-sm font-semibold mb-3">模拟群消息（NapCat 未接时也能测行为）</div>
+        <div class="flex flex-wrap gap-2">
+          <input id="sim-group" class="input input-sm input-bordered w-32" placeholder="群号" value="10000">
+          <input id="sim-who" class="input input-sm input-bordered w-32" placeholder="昵称" value="测试员">
+          <input id="sim-text" class="input input-sm input-bordered flex-1 min-w-48" placeholder="消息内容...">
+          <button id="sim-send" class="btn btn-sm btn-primary">注入</button>
+          <button id="sim-flush" class="btn btn-sm btn-outline">立即触发攒批</button>
+        </div>
+        <div id="sim-result" class="mt-3 text-xs text-emerald-400 font-mono hidden"></div>
+      </div>
+      <div class="glass round-2xl p-5">
+        <div class="text-sm font-semibold mb-3">对话流 <span id="chat-gid" class="text-xs text-slate-500 font-mono"></span></div>
+        <div id="chat-flow" class="space-y-2 max-h-[60vh] overflow-y-auto pr-1"></div>
+      </div>
+    </section>
 
-<!-- ══ 配置 ══ -->
-<section id="tab-config" class="tab-panel">
-  <div class="glass round-2xl p-5">
-    <div class="flex items-center justify-between mb-3">
-      <div class="text-sm font-semibold">agent/.env（改完重启生效）</div>
-      <button id="cfg-reload" class="btn btn-sm btn-ghost">重新读取</button>
-      <button id="cfg-save" class="btn btn-sm btn-primary">保存</button>
-    </div>
-    <textarea id="cfg-editor" class="textarea textarea-bordered w-full h-96 font-mono text-xs" spellcheck="false"></textarea>
-    <div id="cfg-note" class="mt-2 text-xs text-emerald-400"></div>
-    <div id="active-config" class="mt-4"></div>
-  </div>
-</section>
+    <!-- ══ 人设 ══ -->
+    <section id="page-persona" class="page">
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="glass round-2xl p-5">
+          <div class="text-sm font-semibold mb-3">当前人设</div>
+          <div id="persona-card" class="text-sm text-slate-300"></div>
+        </div>
+        <div class="glass round-2xl p-5">
+          <div class="text-sm font-semibold mb-3">few-shot 示例（RAG 注入前导）</div>
+          <div id="persona-shots" class="text-xs text-slate-400 space-y-2"></div>
+        </div>
+      </div>
+    </section>
 
-<!-- ══ 用量统计 ══ -->
-<section id="tab-stats" class="tab-panel">
-  <div class="grid md:grid-cols-3 gap-4">
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">LLM 调用</div>
-      <div id="st-llm" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs mt-2 text-slate-500">加载中...</div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">Embed 调用</div>
-      <div id="st-embed" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs mt-2 text-slate-500">加载中...</div>
-    </div>
-    <div class="glass round-2xl p-5">
-      <div class="text-xs text-slate-500 uppercase">群消息 / 回复</div>
-      <div id="st-msg" class="text-2xl font-mono mt-1">--</div>
-      <div class="text-xs mt-2 text-slate-500">进程运行 --</div>
-    </div>
-  </div>
-  <div class="glass round-2xl p-5 mt-4">
-    <div class="text-xs text-slate-500 uppercase mb-3">最近 24h 调用趋势（LLM+Embed）</div>
-    <div id="st-bars" class="flex items-end gap-1 h-24"></div>
-  </div>
-  <div class="glass round-2xl p-5 mt-4">
-    <div class="text-xs text-slate-500 uppercase mb-3">按群统计</div>
-    <div id="st-table"></div>
-  </div>
-</section>
+    <!-- ══ 知识库 ══ -->
+    <section id="page-kb" class="page">
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">RAG 检索（向量 vec0 + FTS5 + LIKE）</div>
+          <span id="kb-meta" class="text-xs text-slate-500 font-mono"></span>
+        </div>
+        <div class="flex gap-2">
+          <input id="rag-q" class="input input-sm input-bordered flex-1" placeholder="查询内容，如：nmsl / 你妈炸了 / 今天吃什么">
+          <button id="rag-go" class="btn btn-sm btn-primary">检索</button>
+        </div>
+        <div id="rag-meta" class="mt-2 text-xs text-slate-500"></div>
+      </div>
+      <div id="rag-results" class="grid md:grid-cols-3 gap-4"></div>
+    </section>
 
-<!-- ══ 日志 ══ -->
-<section id="tab-logs" class="tab-panel">
-  <div class="glass round-2xl p-5">
-    <div class="flex items-center justify-between mb-3">
-      <div class="text-sm font-semibold">运行日志（实时 SSE）</div>
-      <button id="log-clear" class="btn btn-sm btn-ghost">清屏</button>
-    </div>
-    <div id="log-box" class="font-mono text-xs h-96 overflow-y-auto bg-black/40 rounded-xl p-3 space-y-1"></div>
-  </div>
-</section>
+    <!-- ══ 统计 ══ -->
+    <section id="page-stats" class="page">
+      <div class="glass round-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div class="text-sm font-semibold">调用统计</div>
+          <div class="range-switch">
+            <button class="range-chip active" data-range="1">1小时</button>
+            <button class="range-chip" data-range="24">24小时</button>
+            <button class="range-chip" data-range="72">3天</button>
+            <button class="range-chip" data-range="168">7天</button>
+          </div>
+        </div>
 
-<footer class="text-center mt-4 mb-3 fade-in">
-  <p class="text-xs text-slate-600">
-    <span class="gradient font-medium">chat-clone</span>
-    · 薄服务 · Node + sqlite-vec + SSE · <span id="footer-time" class="font-mono"></span>
-  </p>
-</footer>
+        <div class="grid md:grid-cols-4 gap-4">
+          <div class="stat-card">
+            <div class="stat-label">LLM 调用</div>
+            <div id="st-llm" class="stat-value">--</div>
+            <div id="st-llm-sub" class="stat-note">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Embed 调用</div>
+            <div id="st-embed" class="stat-value">--</div>
+            <div id="st-embed-sub" class="stat-note">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Token 总量</div>
+            <div id="st-token" class="stat-value">--</div>
+            <div id="st-token-sub" class="stat-note">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">群消息 / 回复</div>
+            <div id="st-msg" class="stat-value">--</div>
+            <div id="st-msg-sub" class="stat-note">进程运行 --</div>
+          </div>
+        </div>
 
+        <div class="mt-6 grid lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2">
+            <div class="text-xs text-slate-500 uppercase mb-2">调用趋势（LLM+Embed）</div>
+            <div id="st-trend" class="chart-box"></div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500 uppercase mb-2">Token 趋势</div>
+            <div id="st-token-trend" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="mt-6 grid lg:grid-cols-2 gap-4">
+          <div class="glass round-2xl p-4">
+            <div class="text-xs text-slate-500 uppercase mb-2">模型排行（by Token）</div>
+            <div id="st-model-rank" class="space-y-1"></div>
+          </div>
+          <div class="glass round-2xl p-4">
+            <div class="text-xs text-slate-500 uppercase mb-2">按群统计</div>
+            <div id="st-group-rank" class="space-y-1"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ 日志 ══ -->
+    <section id="page-logs" class="page">
+      <div class="glass round-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">运行日志（实时 SSE）</div>
+          <button id="log-clear" class="btn btn-sm btn-ghost">清屏</button>
+        </div>
+        <div id="log-box" class="font-mono text-xs h-[65vh] overflow-y-auto bg-black/40 rounded-xl p-3 space-y-1"></div>
+      </div>
+    </section>
+
+    <!-- ══ 配置 ══ -->
+    <section id="page-config" class="page">
+      <div class="glass round-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">agent/.env（改完重启生效）</div>
+          <div class="flex gap-2">
+            <button id="cfg-reload" class="btn btn-sm btn-ghost">重新读取</button>
+            <button id="cfg-save" class="btn btn-sm btn-primary">保存</button>
+          </div>
+        </div>
+        <textarea id="cfg-editor" class="textarea textarea-bordered w-full h-[50vh] font-mono text-xs" spellcheck="false"></textarea>
+        <div id="cfg-note" class="mt-2 text-xs text-emerald-400"></div>
+        <div id="active-config" class="mt-4"></div>
+      </div>
+    </section>
+
+  </main>
 </div>
+
 <script src="/web/app.js"></script>
 </body>
 </html>

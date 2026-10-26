@@ -19,34 +19,99 @@ body {
   background-size: 42px 42px;
   z-index: -1;
 }
-.page { max-width: 1200px; margin: 0 auto; padding: 24px 20px 40px; }
 .fade-in { animation: fadeIn .4s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-.hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
-.hdr-left { display: flex; align-items: center; gap: 14px; }
-.hdr h1 { font-size: 1.35rem; font-weight: 700; }
+/* ── AstrBot 式外壳：左导航 + 主区 ── */
+.shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 72px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  background: rgba(12, 12, 20, 0.85);
+  border-right: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.sidebar .logo {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.side-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; width: 100%; align-items: center; }
+.side-item {
+  width: 52px; height: 52px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px;
+  background: transparent; border: none; color: #64748b;
+  border-radius: 12px; cursor: pointer; transition: all .15s;
+  font-size: 0.55rem;
+}
+.side-item svg { width: 20px; height: 20px; }
+.side-item:hover { color: #e2e8f0; background: var(--glass); }
+.side-item.active { color: #a5b4fc; background: rgba(129, 140, 248, .15); box-shadow: inset 0 0 0 1px rgba(129,140,248,.35); }
+.side-footer { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; }
+
+.main { flex: 1; min-width: 0; }
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.page { display: none; max-width: 1280px; margin: 0 auto; padding: 24px 24px 40px; }
+.page.active { display: block; animation: fadeIn .25s ease; }
+
 .gradient { background: linear-gradient(90deg, #818cf8, #22d3ee, #f472b6); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.logo { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; background: var(--glass); border: 1px solid var(--border); border-radius: 14px; }
-.status-pill { display: flex; align-items: center; gap: 8px; background: var(--glass); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; }
 .stat-tag { background: var(--glass); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: .75rem; color: #94a3b8; }
 .pulse-dot { width: 9px; height: 9px; border-radius: 50%; }
 .pulse-dot.live { background: #34d399; box-shadow: 0 0 10px #34d399; animation: pulse 1.6s infinite; }
 .pulse-dot.dead { background: #64748b; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-.tab { background: transparent; border: 1px solid transparent; color: #94a3b8; padding: 6px 14px; border-radius: 999px; font-size: .8rem; cursor: pointer; transition: all .15s; }
-.tab:hover { color: #e2e8f0; background: var(--glass); }
-.tab.active { background: rgba(129, 140, 248, .15); color: #a5b4fc; border-color: rgba(129, 140, 248, .35); }
-
-.tab-panel { display: none; }
-.tab-panel.active { display: block; animation: fadeIn .25s ease; }
-
 .glass { background: var(--glass); border: 1px solid var(--border); backdrop-filter: blur(8px); }
 .round-2xl { border-radius: 18px; }
 .round-xl { border-radius: 12px; }
 .round-2xl, .round-xl, .glass { box-shadow: 0 4px 24px rgba(0,0,0,.25); }
 
+/* ── 总览 Hero ── */
+.hero { padding: 8px 0 20px; }
+.hero-title { font-size: 2rem; font-weight: 800; margin-bottom: 4px; }
+.hero-emoji { display: inline-block; }
+.hero-sub { color: #94a3b8; font-size: .95rem; }
+
+/* ── 统计卡片（AstrBot 式大图标卡片）── */
+.stat-card { background: var(--glass); border: 1px solid var(--border); border-radius: 18px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,.25); }
+.stat-label { font-size: .7rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px; letter-spacing: .05em; }
+.stat-value { font-size: 1.9rem; font-weight: 700; font-family: ui-monospace, monospace; }
+.stat-note { font-size: .72rem; color: #94a3b8; margin-top: 4px; line-height: 1.5; }
+
+/* ── 时间范围切换（AstrBot 式 chips）── */
+.range-switch { display: flex; gap: 4px; background: var(--glass); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.range-chip { background: transparent; border: none; color: #94a3b8; font-size: .75rem; padding: 4px 14px; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.range-chip:hover { color: #e2e8f0; }
+.range-chip.active { background: rgba(129, 140, 248, .2); color: #a5b4fc; }
+
+/* ── 图表 ── */
+.chart-box { height: 240px; }
+
+/* ── 表格 ── */
 table.table th { color: #64748b; font-weight: 500; }
 table.table td { color: #cbd5e1; }
+
+@media (max-width: 640px) {
+  .sidebar { width: 56px; }
+  .side-item { width: 44px; height: 44px; font-size: 0; }
+  .page { padding: 16px 12px 32px; }
+}

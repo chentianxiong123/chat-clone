@@ -1,4 +1,4 @@
-// ── 状态 ──
+// ── 工具 ──
 const $ = (id) => document.getElementById(id)
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleTimeString('zh-CN', { hour12: false }) : '--')
 const fmtSince = (ms) => {
@@ -10,19 +10,25 @@ const fmtSince = (ms) => {
   const h = Math.floor(m / 60)
   return h + 'h ' + (m % 60) + 'm'
 }
+const fmtMs = (ms) => (ms ? (ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms') : '--')
+const fmtNum = (n) => (n == null ? '--' : Number(n).toLocaleString())
+const pct = (r) => (r == null ? '--' : (r * 100).toFixed(0) + '%')
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
 let currentSnap = null
 let ragMeta = null
 
-// ── Tabs ──
-document.querySelectorAll('.tab').forEach((btn) => {
+// ── 导航（AstrBot 式左侧栏）──
+document.querySelectorAll('.side-item').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'))
-    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'))
+    document.querySelectorAll('.side-item').forEach((b) => b.classList.remove('active'))
+    document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'))
     btn.classList.add('active')
-    $('tab-' + btn.dataset.tab).classList.add('active')
-    if (btn.dataset.tab === 'stats') loadStats()
+    const page = btn.dataset.page
+    $('page-' + page).classList.add('active')
+    if (page === 'stats') loadStats(currentRange)
+    if (page === 'persona') loadPersona()
+    if (page === 'kb') loadKbMeta()
   })
 })
 
@@ -34,44 +40,63 @@ evtSource.addEventListener('message', (ev) => {
   if (msg.type === 'log') appendLog(msg.entry)
 })
 
+// ── 问候 ──
+function greeting() {
+  const h = new Date().getHours()
+  if (h < 5) return ['凌晨好', '🌙']
+  if (h < 9) return ['早上好', '☀️']
+  if (h < 12) return ['上午好', '🌤️']
+  if (h < 14) return ['中午好', '🍚']
+  if (h < 18) return ['下午好', '☕']
+  if (h < 22) return ['晚上好', '🌆']
+  return ['夜深了', '🌙']
+}
+
 // ── 渲染状态 ──
 function renderState(snap) {
   currentSnap = snap
   $('conn-dot').className = 'pulse-dot ' + (snap.connected ? 'live' : 'dead')
-  $('conn-text').textContent = snap.connected ? `NapCat 已连接` : 'NapCat 未连接'
-  const connPill = document.querySelector('.status-pill')
-  connPill.title = snap.connError || (snap.connected ? '连接正常' : '未接入 NapCat 适配器')
-  if (snap.connError) connPill.classList.add('ring-1', 'ring-red-500/50')
-  $('batch-info').textContent = `N=${snap.batchN} / T=${(snap.batchT / 1000).toFixed(0)}s`
-  $('cooldown').textContent = snap.cooldownLeftMs > 0 ? fmtSince(snap.cooldownLeftMs) : '就绪'
-  $('group-count').textContent = String(Object.keys(snap.groups).length)
-  $('last-reply').textContent = fmtTime(snap.lastReplyAt)
+  $('conn-text').textContent = snap.connected ? 'NapCat 已连接' : 'NapCat 未连接'
+
+  $('greet').textContent = greeting()[0]
+  $('hero-emoji').textContent = greeting()[1]
+  $('ov-selfname').textContent = snap.selfName
+  $('ov-conn').textContent = snap.connected ? '已连接' : '未连接'
+  $('ov-conn-note').textContent = snap.connError || (snap.connected ? 'NapCat 正常' : '未接入 NapCat 适配器')
+  if (snap.connError) $('ov-conn').classList.add('text-red-400')
+  else $('ov-conn').classList.remove('text-red-400')
+  $('ov-groups').textContent = String(Object.keys(snap.groups).length)
+  $('ov-last-reply').textContent = fmtTime(snap.lastReplyAt)
   let dialogTotal = 0
   for (const g of Object.values(snap.groups)) dialogTotal += g.dialog.length
-  $('dialog-total').textContent = String(dialogTotal)
-  $('subtitle').textContent = `本人：${snap.selfName}`
+  $('ov-dialog').textContent = String(dialogTotal)
+  $('ov-batch-n').textContent = snap.batchN
+  $('ov-batch-t').textContent = (snap.batchT / 1000).toFixed(0)
+  $('ov-cooldown').textContent = snap.cooldownLeftMs > 0 ? fmtSince(snap.cooldownLeftMs) : '就绪'
+  $('ov-mode-note').textContent = 'respondMode: ' + snap.respondMode
 
   const list = $('group-list')
   const groups = Object.values(snap.groups).sort((a, b) => b.lastReplyAt - a.lastReplyAt)
   if (!groups.length) {
-    list.innerHTML = `<div class="glass round-2xl p-8 text-center text-slate-500">还没有群消息，去「调试台」模拟几条试试</div>`
+    list.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">还没有群消息，去「聊天」页模拟几条试试</div>`
     return
   }
   list.innerHTML = groups.map((g) => renderGroup(g)).join('')
   bindGroupButtons()
+  renderChatFlow()
 }
 
+// ── 群卡片 ──
 function renderGroup(g) {
   const tLeft = g.timerDeadlineAt ? Math.max(0, g.timerDeadlineAt - Date.now()) : null
   const timerBadge = tLeft !== null
     ? `<span class="badge badge-sm badge-warning">攒批中 ${fmtSince(tLeft)}</span>`
     : (g.pending.length ? `<span class="badge badge-sm badge-info">待触发</span>` : ``)
-  // 攒批进度条：目标 N 条
-  const batchPct = Math.min(100, Math.round((g.pending.length / currentSnap.batchN) * 100))
+  const batchPct = currentSnap ? Math.min(100, Math.round((g.pending.length / currentSnap.batchN) * 100)) : 0
   const progressHtml = g.pending.length
     ? `<div class="mt-2">
         <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${currentSnap.batchN}</span>
+          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${currentSnap?.batchN || 5}</span>
         </div>
         <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
           <div class="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full transition-all" style="width:${batchPct}%"></div>
@@ -82,16 +107,15 @@ function renderGroup(g) {
     ? `<div class="text-xs text-amber-300/80 mt-1">攒批：
         <span class="font-mono">${esc(g.pending.join(' ').slice(0, 160))}</span></div>`
     : ``
-  // 记忆：每条带时间戳 + 角色色差
   const dialogHtml = g.dialog.length
     ? `<div class="mt-2 space-y-1">${
         g.dialog.map((m) => `
           <div class="text-xs ${m.role === 'user' ? 'text-sky-300' : 'text-emerald-300'} leading-snug">
             <span class="text-[10px] text-slate-600 font-mono mr-1">${m.time ? fmtTime(m.time) : ''}</span>
-            <span class="${m.role === 'user' ? '' : 'opacity-90'}">${m.role === 'user' ? '👤' : '🤖'}${esc(m.content.slice(0, 80))}</span>
+            ${m.role === 'user' ? '👤' : '🤖'}${esc(m.content.slice(0, 80))}
           </div>`).join('')
       }</div>
-      <div class="text-[10px] text-slate-600 mt-1">记忆 ${g.dialog.length} 条 · 历史 ${currentSnap.batchN * 2} 轮</div>`
+      <div class="text-[10px] text-slate-600 mt-1">记忆 ${g.dialog.length} 条</div>`
     : ``
   return `
   <div class="glass round-2xl p-4" data-gid="${g.groupId}">
@@ -125,13 +149,33 @@ function bindGroupButtons() {
   })
 }
 
-// 全清按钮（状态页顶部）
-$('clear-all')?.addEventListener('click', async () => {
+$('ov-clear-all').addEventListener('click', async () => {
   if (!confirm('清空所有群的会话记忆？')) return
   await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
 })
 
-// ── 调试台 ──
+// ── 聊天流 ──
+function renderChatFlow() {
+  if (!currentSnap) return
+  const groups = Object.values(currentSnap.groups)
+  const gid = groups[0]?.groupId
+  const box = $('chat-flow')
+  $('chat-gid').textContent = gid ? `· 群 ${gid}` : ''
+  if (!gid || !groups[0].dialog.length) {
+    box.innerHTML = `<div class="text-center text-slate-600 text-sm py-8">暂无对话，先在「模拟群消息」注入一条</div>`
+    return
+  }
+  box.innerHTML = groups[0].dialog.map((m) => `
+    <div class="flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}">
+      <div class="max-w-[80%] round-xl px-4 py-2 text-sm ${m.role === 'user' ? 'bg-slate-800/70 text-sky-200' : 'bg-indigo-600/50 text-emerald-100'}">
+        <div class="text-[10px] text-slate-500 mb-1">${m.role === 'user' ? '👤 群友' : '🤖 ' + (currentSnap?.selfName || '我')} · ${m.time ? fmtTime(m.time) : ''}</div>
+        <div class="whitespace-pre-wrap break-words">${esc(m.content)}</div>
+      </div>
+    </div>`).join('')
+  box.scrollTop = box.scrollHeight
+}
+
+// ── 聊天页注入 ──
 $('sim-send').addEventListener('click', async () => {
   const text = $('sim-text').value.trim()
   if (!text) return
@@ -146,6 +190,7 @@ $('sim-send').addEventListener('click', async () => {
   $('sim-result').textContent = `注入成功 → 群 ${res.groupId}，已进入攒批队列`
   $('sim-text').value = ''
 })
+$('sim-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sim-send').click() })
 
 $('sim-flush').addEventListener('click', async () => {
   const gid = $('sim-group').value || '10000'
@@ -154,7 +199,37 @@ $('sim-flush').addEventListener('click', async () => {
   $('sim-result').textContent = `已触发群 ${gid} 攒批`
 })
 
-// ── RAG 检索 ──
+// ── 人设 ──
+async function loadPersona() {
+  const r = await fetch('/api/status')
+  const res = await r.json()
+  const p = res.persona || {}
+  $('persona-card').innerHTML = `
+    <div class="space-y-3">
+      <div><span class="text-slate-500">姓名：</span><span class="font-mono">${esc(p.name || '--')}</span></div>
+      <div><span class="text-slate-500">称呼朋友：</span><span class="font-mono">${esc(p.friendName || '--')}</span></div>
+      ${p.base ? `<div class="text-slate-300">${esc(p.base)}</div>` : ''}
+      ${p.traits?.length ? `<div class="flex flex-wrap gap-1">${p.traits.map(t => `<span class="badge badge-sm badge-outline">${esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="text-slate-500 text-xs">LLM: <span class="font-mono">${esc(res.llm?.model || '--')}</span></div>
+    </div>`
+  const shots = p.demoDialogs || p.fewShots || ''
+  $('persona-shots').innerHTML = Array.isArray(shots)
+    ? shots.map((s) => `<div class="glass round-lg p-2 text-[11px] font-mono">${esc(s)}</div>`).join('')
+    : (typeof shots === 'string' && shots.trim()
+      ? shots.split('\n').map((s) => `<div class="glass round-lg p-2 text-[11px] font-mono whitespace-pre-wrap">${esc(s)}</div>`).join('')
+      : '<div class="text-slate-600">未配置 few-shot 示例（PERSONA_DEMO_DIALOGS）</div>')
+}
+
+// ── 知识库 ──
+async function loadKbMeta() {
+  const r = await fetch('/api/status')
+  const res = await r.json()
+  if (res.rag) {
+    $('kb-meta').textContent = `vec0 ${res.rag.vecLoaded ? '✓' : '✗'} · ${res.rag.count ? res.rag.count + ' chunk' : ''} · ${res.rag.embedOk ? 'embed ✓' : 'embed ✗'}`
+    $('rag-badge').textContent = `RAG ${res.rag.vecLoaded ? 'vec' : ''} ${res.rag.count ? '·' + res.rag.count + 'chunk' : ''} ${res.rag.embedOk ? '·embed' : ''}`
+  }
+}
+
 $('rag-go').addEventListener('click', async () => {
   const q = $('rag-q').value.trim()
   if (!q) return
@@ -219,45 +294,104 @@ function renderRagResults(res) {
   })
 }
 
-// ── 手测 LLM ──
-async function loadModels() {
-  const r = await fetch('/api/models')
-  const res = await r.json()
-  const sel = $('llm-model')
-  sel.innerHTML = res.models.map((m) => `<option value="${esc(m.id)}">${esc(m.id)}</option>`).join('')
-}
-$('llm-go').addEventListener('click', async () => {
-  const prompt = $('llm-prompt').value.trim()
-  if (!prompt) return
-  const btn = $('llm-go')
-  const out = $('llm-out')
-  btn.textContent = '发送中...'
-  btn.disabled = true
-  out.classList.remove('hidden')
-  out.textContent = '…'
-  try {
-    const r = await fetch('/api/llm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, withRag: $('llm-rag').checked }),
-    })
-    const res = await r.json()
-    out.classList.remove('hidden')
-    if (res.ok) out.textContent = res.text || '(空回复)'
-    else out.textContent = '❌ ' + (res.error || '未知错误')
-    out.className = 'mt-3 text-sm whitespace-pre-wrap glass round-xl p-4 ' + (res.ok ? 'text-emerald-200' : 'text-red-300')
-  } finally {
-    btn.textContent = '发送'
-    btn.disabled = false
-  }
+// ── 统计（ECharts）──
+let currentRange = 24
+let stTrendChart = null
+let stTokenChart = null
+
+document.querySelectorAll('.range-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.range-chip').forEach((c) => c.classList.remove('active'))
+    chip.classList.add('active')
+    currentRange = Number(chip.dataset.range)
+    loadStats(currentRange)
+  })
 })
+
+async function loadStats(hours) {
+  const r = await fetch('/api/stats?hours=' + (hours || 24))
+  const s = await r.json()
+  const agg = s.agg || {}
+  const llm = agg.llm || {}
+  const embed = agg.embed || {}
+  const groups = s.perGroup || {}
+  const models = s.perModel || {}
+  const series = s.timeseries || []
+  const gEntries = Object.entries(groups).sort((a, b) => b[1].msg - a[1].msg)
+  const mEntries = Object.entries(models).sort((a, b) => (b[1].tokensIn + b[1].tokensOut) - (a[1].tokensIn + a[1].tokensOut))
+  const totalMsg = Object.values(groups).reduce((a, g) => a + g.msg, 0) || 0
+  const totalReply = Object.values(groups).reduce((a, g) => a + g.reply, 0) || 0
+
+  $('st-llm').textContent = String(llm.calls || 0)
+  $('st-llm-sub').innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br>成功率 ${pct(llm.successRate)} · 均值 <span class="font-mono">${fmtMs(llm.avgTtftMs)}</span>`
+  $('st-embed').textContent = String(embed.calls || 0)
+  $('st-embed-sub').innerHTML = `成功 ${embed.ok || 0} · 失败 <span class="${embed.fail ? 'text-red-400' : ''}">${embed.fail || 0}</span><br>成功率 ${pct(embed.successRate)}`
+  $('st-token').textContent = fmtNum((llm.tokensIn || 0) + (llm.tokensOut || 0))
+  $('st-token-sub').innerHTML = `in <span class="font-mono">${fmtNum(llm.tokensIn)}</span> · out <span class="font-mono">${fmtNum(llm.tokensOut)}</span>`
+  $('st-msg').textContent = `${totalMsg} / ${totalReply}`
+  $('st-msg-sub').textContent = `进程运行 ${fmtSince(s.sinceStart)}`
+
+  // 调用趋势
+  const stEl = $('st-trend')
+  if (!stTrendChart) stTrendChart = echarts.init(stEl)
+  stTrendChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 24, bottom: 28 },
+    xAxis: { type: 'category', data: series.map(x => x.hour.slice(5, 16)), axisLabel: { color: '#64748b', fontSize: 10 } },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#64748b', fontSize: 10 } },
+    series: [
+      { name: 'LLM', type: 'line', smooth: true, areaStyle: { opacity: 0.15 }, data: series.map(x => x.llmCalls), itemStyle: { color: '#6366f1' } },
+      { name: 'Embed', type: 'line', smooth: true, areaStyle: { opacity: 0.15 }, data: series.map(x => x.embedCalls), itemStyle: { color: '#22d3ee' } },
+    ],
+  })
+
+  // Token 趋势
+  const ttEl = $('st-token-trend')
+  if (!stTokenChart) stTokenChart = echarts.init(ttEl)
+  stTokenChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 24, bottom: 28 },
+    xAxis: { type: 'category', data: series.map(x => x.hour.slice(5, 16)), axisLabel: { color: '#64748b', fontSize: 10 } },
+    yAxis: { type: 'value', axisLabel: { color: '#64748b', fontSize: 10 } },
+    series: [
+      { name: 'tokens in', type: 'bar', stack: 't', data: series.map(x => x.tokensIn), itemStyle: { color: '#a78bfa' } },
+      { name: 'tokens out', type: 'bar', stack: 't', data: series.map(x => x.tokensOut), itemStyle: { color: '#34d399' } },
+    ],
+  })
+
+  // 模型排行
+  $('st-model-rank').innerHTML = mEntries.length
+    ? mEntries.map(([name, m]) => rankRow(name, `${m.calls} 次 · ${fmtNum(m.tokensIn + m.tokensOut)} tok`, `${m.calls ? '✓' + m.ok + ' · 均值 ' + fmtMs(m.avgDurationMs) : '--'}`, (m.tokensIn + m.tokensOut), mEntries[0][1].tokensIn + mEntries[0][1].tokensOut))
+    : '<div class="text-xs text-slate-600">暂无数据</div>'
+
+  // 按群
+  $('st-group-rank').innerHTML = gEntries.length
+    ? gEntries.map(([gid, g]) => rankRow('群 ' + gid, `消息 ${g.msg} · 回复 ${g.reply}`, '最后活跃 ' + fmtTime(g.lastAt), g.msg, gEntries[0][1].msg))
+    : '<div class="text-xs text-slate-600">暂无数据</div>'
+}
+
+function rankRow(name, val, sub, n, max) {
+  const w = max ? Math.max(4, Math.round((n / max) * 100)) : 0
+  return `
+  <div class="mb-2">
+    <div class="flex items-center justify-between text-xs">
+      <span class="font-mono">${esc(name)}</span>
+      <span class="text-slate-400">${val}</span>
+    </div>
+    <div class="text-[10px] text-slate-600">${sub}</div>
+    <div class="w-full h-1 bg-black/40 rounded-full mt-1 overflow-hidden">
+      <div class="h-full bg-indigo-500/70 rounded-full" style="width:${w}%"></div>
+    </div>
+  </div>`
+}
 
 // ── 配置 ──
 async function loadConfig() {
   const r = await fetch('/api/config')
   const res = await r.json()
   $('cfg-editor').value = res.env
-  // 同时渲染活跃配置摘要
   if (res.active) renderActiveConfig(res.active, res.rag)
 }
 
@@ -327,66 +461,11 @@ function appendLog(entry) {
 }
 $('log-clear').addEventListener('click', () => { $('log-box').innerHTML = ''; logCount = 0 })
 
-// ── 用量统计 ──
-async function loadStats() {
-  const r = await fetch('/api/stats?hours=24')
-  const s = await r.json()
-  const t = s.totals || {}
-  const llm = t.llm || {}
-  const embed = t.embed || {}
-  const groups = s.perGroup || {}
-  const series = s.timeseries || []
-  const maxCalls = Math.max(1, ...series.map((x) => x.llmCalls + x.embedCalls))
-  const gEntries = Object.entries(groups).sort((a, b) => b[1].msg - a[1].msg)
-  const totalMsg = Object.values(groups).reduce((a, g) => a + g.msg, 0) || 0
-  const totalReply = Object.values(groups).reduce((a, g) => a + g.reply, 0) || 0
-
-  $('st-llm').textContent = String(llm.ok + llm.fail || 0)
-  $('st-llm').nextElementSibling.innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br><span class="text-slate-500">Token in ${(llm.tokensIn || 0).toLocaleString()} · out ${(llm.tokensOut || 0).toLocaleString()}</span>`
-  $('st-embed').textContent = String(embed.ok + embed.fail || 0)
-  $('st-embed').nextElementSibling.innerHTML = `成功 ${embed.ok || 0} · 失败 <span class="${embed.fail ? 'text-red-400' : ''}">${embed.fail || 0}</span>`
-  $('st-msg').textContent = `${totalMsg} / ${totalReply}`
-  $('st-msg').nextElementSibling.textContent = `进程运行 ${fmtSince(s.sinceStart)}`
-
-  $('st-bars').innerHTML = series.map((x) => {
-    const h = x.hour.slice(11, 16)
-    const total = x.llmCalls + x.embedCalls
-    const pct = Math.max(4, Math.round((total / maxCalls) * 100))
-    return `<div class="flex flex-col items-center gap-1 flex-1">
-      <div class="text-[9px] text-slate-500">${total || ''}</div>
-      <div class="w-full bg-indigo-500/60 rounded-sm" style="height:${pct}px" title="LLM ${x.llmCalls} · Embed ${x.embedCalls}"></div>
-      <div class="text-[9px] text-slate-600 font-mono">${h}</div>
-    </div>`
-  }).join('')
-
-  $('st-table').innerHTML = gEntries.length ? `<table class="table table-xs w-full">
-    <thead><tr><th>群号</th><th>消息</th><th>回复</th><th>最后活跃</th></tr></thead>
-    <tbody>${gEntries.map(([gid, g]) => `<tr>
-      <td class="font-mono">${esc(gid)}</td>
-      <td>${g.msg}</td>
-      <td>${g.reply}</td>
-      <td>${fmtTime(g.lastAt)}</td>
-    </tr>`).join('')}</tbody>
-  </table>` : '<div class="text-xs text-slate-600">暂无数据</div>'
-}
-
 // ── 初始化 ──
 loadConfig()
-loadModels()
+loadKbMeta()
 setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }, 1000)
+setInterval(() => { if (document.getElementById('page-overview').classList.contains('active')) renderChatFlow() }, 2000)
 
-// 每 5s 拉一次 RAG 状态徽标（静态信息，SSE 不推）
-setInterval(async () => {
-  if (!ragMeta) {
-    const r = await fetch('/api/status')
-    const res = await r.json()
-    if (res.rag) {
-      $('rag-badge').textContent = `RAG ${res.rag.vecLoaded ? 'vec' : ''} ${res.rag.count ? '·' + res.rag.count + 'chunk' : ''} ${res.rag.embedOk ? '·embed' : ''}`
-    }
-  }
-}, 5000)
-
-// 加载完成后立即拉一次状态
-fetch('/api/status').then((r) => r.json()).then((res) => {
-  if (res.rag) $('rag-badge').textContent = `RAG ${res.rag.vecLoaded ? 'vec' : ''} ${res.rag.count ? '·' + res.rag.count + 'chunk' : ''} ${res.rag.embedOk ? '·embed' : ''}`
-})
+// 首次状态（SSE 会推，兜底拉一次）
+fetch('/api/state').then((r) => r.json()).then((snap) => renderState(snap)).catch(() => {})
