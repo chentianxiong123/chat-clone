@@ -38,6 +38,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
       })
       const content = resp.choices?.[0]?.message?.content
       const usage = resp.usage
+      const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
       recordUsage({
         kind: 'llm',
         sub: config.llm.model,
@@ -46,6 +47,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
         cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
         tokensIn: usage?.prompt_tokens ?? 0,
         tokensOut: usage?.completion_tokens ?? 0,
+        cachedTokens,
         ts: Date.now(),
         durationMs: Date.now() - t0,
       })
@@ -73,6 +75,7 @@ export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: nu
     })
     const content = resp.choices?.[0]?.message?.content
     const usage = resp.usage
+    const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
     recordUsage({
       kind: 'llm',
       sub: config.llm.model,
@@ -81,6 +84,7 @@ export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: nu
       cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
       tokensIn: usage?.prompt_tokens ?? 0,
       tokensOut: usage?.completion_tokens ?? 0,
+      cachedTokens,
       ts: Date.now(),
       durationMs: Date.now() - t0,
     })

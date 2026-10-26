@@ -389,11 +389,11 @@ async function loadStats(hours) {
     : '未配置价格（LLM_PRICE_PER_M_IN/OUT）→ 免费')
 
   $('st-llm').textContent = String(llm.calls || 0)
-  $('st-llm-sub').innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br>成功率 ${pct(llm.successRate)} · 均值 <span class="font-mono">${fmtMs(llm.avgTtftMs)}</span>`
+  $('st-llm-sub').innerHTML = `成功 ${llm.ok || 0} · 失败 <span class="${llm.fail ? 'text-red-400' : ''}">${llm.fail || 0}</span><br>成功率 ${pct(llm.successRate)} · 缓存命中 <span class="font-mono ${(llm.cacheHitRate || 0) > 0 ? 'text-emerald-400' : ''}">${pct(llm.cacheHitRate)}</span>`
   $('st-embed').textContent = String(embed.calls || 0)
   $('st-embed-sub').innerHTML = `成功 ${embed.ok || 0} · 失败 <span class="${embed.fail ? 'text-red-400' : ''}">${embed.fail || 0}</span><br>成功率 ${pct(embed.successRate)}`
   $('st-token').textContent = fmtNum((llm.tokensIn || 0) + (llm.tokensOut || 0))
-  $('st-token-sub').innerHTML = `in <span class="font-mono">${fmtNum(llm.tokensIn)}</span> · out <span class="font-mono">${fmtNum(llm.tokensOut)}</span>`
+  $('st-token-sub').innerHTML = `in <span class="font-mono">${fmtNum(llm.tokensIn)}</span> · out <span class="font-mono">${fmtNum(llm.tokensOut)}</span>${llm.cachedTokens ? ` · 缓存 <span class="font-mono text-emerald-400">${fmtNum(llm.cachedTokens)}</span>` : ''}`
   $('st-msg').textContent = `${totalMsg} / ${totalReply}`
   $('st-msg-sub').textContent = `进程运行 ${fmtSince(s.sinceStart)}`
 

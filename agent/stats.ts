@@ -11,20 +11,22 @@ export interface UsageRecord {
   cost: number
   tokensIn: number
   tokensOut: number
+  /** 服务端命中前缀缓存的 token 数（prompt_tokens_details.cached_tokens） */
+  cachedTokens?: number
   ts: number
   durationMs?: number
   ttftMs?: number
 }
 
 export interface UsageSummary {
-  totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number }>
+  totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number; cachedTokens: number }>
   perGroup: Record<string, { msg: number; reply: number; lastAt: number }>
-  perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }>
+  perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; cachedTokens: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }>
   perProvider: Record<string, { calls: number; cost: number }>
   timeseries: Array<{ hour: string; llmCalls: number; embedCalls: number; msgs: number; replies: number; tokensIn: number; tokensOut: number }>
   sinceStart: number
   agg: {
-    llm: { calls: number; ok: number; fail: number; successRate: number; avgDurationMs: number; avgTtftMs: number; tokensIn: number; tokensOut: number; cost: number }
+    llm: { calls: number; ok: number; fail: number; successRate: number; avgDurationMs: number; avgTtftMs: number; tokensIn: number; tokensOut: number; cachedTokens: number; cacheHitRate: number; cost: number }
     embed: { calls: number; ok: number; fail: number; successRate: number; cost: number }
     totalCost: number
   }
@@ -50,7 +52,8 @@ function openDb(): DatabaseSync {
         fail INTEGER NOT NULL DEFAULT 0,
         cost REAL NOT NULL DEFAULT 0,
         tokens_in INTEGER NOT NULL DEFAULT 0,
-        tokens_out INTEGER NOT NULL DEFAULT 0
+        tokens_out INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_log(ts);
       CREATE INDEX IF NOT EXISTS idx_usage_kind ON usage_log(kind);
@@ -65,6 +68,7 @@ function openDb(): DatabaseSync {
     const cols = (db.prepare(`PRAGMA table_info(usage_log)`).all() as Array<{ name: string }>).map(c => c.name)
     if (!cols.includes('duration_ms')) db.exec(`ALTER TABLE usage_log ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0`)
     if (!cols.includes('ttft_ms')) db.exec(`ALTER TABLE usage_log ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0`)
+    if (!cols.includes('cached_tokens')) db.exec(`ALTER TABLE usage_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
     _db = db
     return db
   } catch (e) {
@@ -80,8 +84,8 @@ export function recordUsage(rec: UsageRecord): void {
   if (!db) return
   try {
     db.prepare(
-      `INSERT INTO usage_log(ts, kind, sub, ok, fail, cost, tokens_in, tokens_out, duration_ms, ttft_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO usage_log(ts, kind, sub, ok, fail, cost, tokens_in, tokens_out, duration_ms, ttft_ms, cached_tokens)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       rec.ts,
       rec.kind,
@@ -93,6 +97,7 @@ export function recordUsage(rec: UsageRecord): void {
       rec.tokensOut,
       Math.round(rec.durationMs ?? 0),
       Math.round(rec.ttftMs ?? 0),
+      Math.round(rec.cachedTokens ?? 0),
     )
   } catch (e) {
     console.warn('[Stats] 写入失败:', (e as Error).message)
@@ -137,40 +142,43 @@ export function getUsageSummary(hours = 24): UsageSummary {
     timeseries: [],
     sinceStart: 0,
     agg: {
-      llm: { calls: 0, ok: 0, fail: 0, successRate: 0, avgDurationMs: 0, avgTtftMs: 0, tokensIn: 0, tokensOut: 0, cost: 0 },
+      llm: { calls: 0, ok: 0, fail: 0, successRate: 0, avgDurationMs: 0, avgTtftMs: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0, cacheHitRate: 0, cost: 0 },
       embed: { calls: 0, ok: 0, fail: 0, successRate: 0, cost: 0 },
       totalCost: 0,
     },
   }
   if (!db) return empty
   const since = Date.now() - hours * 3600 * 1000
-  const totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number }> = {}
-  const perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }> = {}
+  const totals: Record<string, { ok: number; fail: number; cost: number; tokensIn: number; tokensOut: number; cachedTokens: number }> = {}
+  const perModel: Record<string, { calls: number; tokensIn: number; tokensOut: number; cachedTokens: number; ok: number; fail: number; avgDurationMs: number; avgTtftMs: number; cost: number }> = {}
   const perProvider: Record<string, { calls: number; cost: number }> = {}
 
   const agg = {
-    llm: { ok: 0, fail: 0, durationSum: 0, durationN: 0, ttftSum: 0, ttftN: 0, tokensIn: 0, tokensOut: 0, cost: 0 },
+    llm: { ok: 0, fail: 0, durationSum: 0, durationN: 0, ttftSum: 0, ttftN: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0, cost: 0 },
     embed: { ok: 0, fail: 0, cost: 0 },
   }
 
   for (const r of db.prepare(
-    `SELECT kind, ok, fail, cost, tokens_in, tokens_out, duration_ms, ttft_ms FROM usage_log WHERE ts >= ?`,
+    `SELECT kind, sub, ok, fail, cost, tokens_in, tokens_out, cached_tokens, duration_ms, ttft_ms FROM usage_log WHERE ts >= ?`,
   ).all(since) as Array<{
     kind: string
+    sub: string | null
     ok: number
     fail: number
     cost: number
     tokens_in: number
     tokens_out: number
+    cached_tokens: number
     duration_ms: number
     ttft_ms: number
   }>) {
-    const t = totals[r.kind] ?? { ok: 0, fail: 0, cost: 0, tokensIn: 0, tokensOut: 0 }
+    const t = totals[r.kind] ?? { ok: 0, fail: 0, cost: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0 }
     t.ok += r.ok
     t.fail += r.fail
     t.cost += r.cost
     t.tokensIn += r.tokens_in
     t.tokensOut += r.tokens_out
+    t.cachedTokens += r.cached_tokens
     totals[r.kind] = t
 
     if (r.kind === 'llm') {
@@ -178,16 +186,18 @@ export function getUsageSummary(hours = 24): UsageSummary {
       agg.llm.fail += r.fail
       agg.llm.tokensIn += r.tokens_in
       agg.llm.tokensOut += r.tokens_out
+      agg.llm.cachedTokens += r.cached_tokens
       agg.llm.cost += r.cost
       if (r.duration_ms > 0) { agg.llm.durationSum += r.duration_ms; agg.llm.durationN++ }
       if (r.ttft_ms > 0) { agg.llm.ttftSum += r.ttft_ms; agg.llm.ttftN++ }
 
-      const m = perModel[r.sub || '当前模型'] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
+      const m = perModel[r.sub || '当前模型'] ?? { calls: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
       m.calls++
       m.ok += r.ok
       m.fail += r.fail
       m.tokensIn += r.tokens_in
       m.tokensOut += r.tokens_out
+      m.cachedTokens += r.cached_tokens
       m.cost += r.cost
       if (r.duration_ms > 0) m.avgDurationMs += r.duration_ms
       if (r.ttft_ms > 0) m.avgTtftMs += r.ttft_ms
@@ -198,7 +208,7 @@ export function getUsageSummary(hours = 24): UsageSummary {
       agg.embed.fail += r.fail
       agg.embed.cost += r.cost
       const key = r.sub || 'Embed'
-      const em = perModel[key] ?? { calls: 0, tokensIn: 0, tokensOut: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
+      const em = perModel[key] ?? { calls: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0, ok: 0, fail: 0, avgDurationMs: 0, avgTtftMs: 0, cost: 0 }
       em.calls++
       em.ok += r.ok
       em.fail += r.fail
@@ -284,6 +294,8 @@ export function getUsageSummary(hours = 24): UsageSummary {
         avgTtftMs: agg.llm.ttftN ? agg.llm.ttftSum / agg.llm.ttftN : 0,
         tokensIn: agg.llm.tokensIn,
         tokensOut: agg.llm.tokensOut,
+        cachedTokens: agg.llm.cachedTokens,
+        cacheHitRate: agg.llm.tokensIn ? agg.llm.cachedTokens / agg.llm.tokensIn : 0,
         cost: agg.llm.cost,
       },
       embed: {
