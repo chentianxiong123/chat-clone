@@ -1,7 +1,7 @@
 import { config } from './config.js'
 import { callLlm, type ChatMessage } from './llm.js'
 import { searchRag } from './rag.js'
-import { buildSystemPrompt } from './prompt.js'
+import { buildSystemPrompt, buildRagContextMessage } from './prompt.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
   loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
@@ -217,13 +217,15 @@ export class AgentCore {
       }
 
       const ragContext = await searchRag(ctx)
-      const systemPrompt = buildSystemPrompt(ragContext, t)
+      const systemPrompt = buildSystemPrompt(t)
+      const ragMsg = buildRagContextMessage(ragContext)
 
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(ragMsg ? [ragMsg] : []),
         userMsg,
       ]
 
@@ -280,10 +282,11 @@ export class AgentCore {
     const p = paramFor(t)
     try {
       const ragContext = await searchRag(lastMsg)
-      const systemPrompt = buildSystemPrompt(ragContext, t)
+      const systemPrompt = buildSystemPrompt(t)
+      const ragMsg = buildRagContextMessage(ragContext)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
-      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...hist, userMsg]
+      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...hist, ...(ragMsg ? [ragMsg] : []), userMsg]
       const reply = await callLlm(messages)
       if (!reply) return
       const wait = this.lastReplyAt + p.cooldown - Date.now()

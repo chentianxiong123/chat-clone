@@ -10,7 +10,7 @@ export const config = {
     baseUrl: process.env.LLM_BASE_URL || '',
     model: process.env.LLM_MODEL || '',
     apiKey: process.env.LLM_API_KEY || '',
-    maxTokens: Number(process.env.LLM_MAX_TOKENS) || 1024,
+    maxTokens: Number(process.env.LLM_MAX_TOKENS) || 2048,
     temperature: Number(process.env.LLM_TEMPERATURE) || 1.0,
     retryAttempts: Number(process.env.LLM_RETRY_ATTEMPTS) || 3,
     retryDelayMs: Number(process.env.LLM_RETRY_DELAY_MS) || 1000,
@@ -70,7 +70,7 @@ export const config = {
     t: Number(process.env.BATCH_T) || 60_000,
   },
   agent: {
-    maxHistory: Number(process.env.MAX_HISTORY) || 20,
+    maxHistory: Number(process.env.MAX_HISTORY) || 40,
     replyCooldown: Number(process.env.REPLY_COOLDOWN) || 25_000,
     respondMode: process.env.RESPOND_MODE || 'auto', // "auto" | "mention"
     // 私聊独立策略：攒批条数/时间（默认1条即回，秒回）
@@ -102,7 +102,7 @@ export const config = {
     // 持久化开关：把每场景对话存 sqlite，重启不丢
     memoryPersist: process.env.MEMORY_PERSIST !== 'false',
     // 上下文最大 token（超过阈值触发 LLM 摘要压缩；0=关闭压缩）
-    memoryMaxTokens: Number(process.env.MEMORY_MAX_TOKENS) || 4096,
+    memoryMaxTokens: Number(process.env.MEMORY_MAX_TOKENS) || 16384,
     // 压缩触发阈值比例（占用超 maxTokens*此比例 触发）
     memoryCompressThreshold: Number(process.env.MEMORY_COMPRESS_THRESHOLD) || 0.82,
     // 压缩后保留最近上下文的比例（精确保留，老的进摘要）
