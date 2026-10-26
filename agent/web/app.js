@@ -511,6 +511,34 @@ async function loadConfig() {
   if (res.active) renderActiveConfig(res.active, res.rag, res.profileMeta)
 }
 
+async function loadPresets() {
+  const r = await fetch('/api/config/presets')
+  const res = await r.json()
+  const sel = $('cfg-preset')
+  if (!sel || !Array.isArray(res.presets)) return
+  sel.innerHTML = res.presets.map(p =>
+    `<option value="${esc(p.name)}" title="${esc(p.description)}">${esc(p.label)} — ${esc(p.description)}</option>`
+  ).join('')
+}
+
+async function postConfigAction(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  })
+  const res = await r.json()
+  const note = $('cfg-preset-note')
+  if (res.ok) {
+    if (typeof res.env === 'string') $('cfg-editor').value = res.env
+    note.textContent = '✓ ' + res.note
+    note.className = 'text-xs text-emerald-400'
+  } else {
+    note.textContent = '❌ ' + (res.error || '操作失败')
+    note.className = 'text-xs text-red-400'
+  }
+}
+
 function renderActiveConfig(cfg, rag, profileMeta) {
   const panels = document.getElementById('active-config')
   if (!panels) return
@@ -591,7 +619,17 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       </div>
     </div>`
 }
-$('cfg-reload').addEventListener('click', loadConfig)
+$('cfg-reload').addEventListener('click', () => { $('cfg-preset-note').textContent = ''; loadConfig() })
+$('cfg-apply-preset').addEventListener('click', () => {
+  const name = $('cfg-preset').value
+  if (!name) return
+  if (!confirm('将修改 .env 中相关配置项（自动备份），重启后生效。继续？')) return
+  void postConfigAction('/api/config/preset', { name })
+})
+$('cfg-reset').addEventListener('click', () => {
+  if (!confirm('恢复默认的触发/节律/近期状态配置（自动备份，保留密钥与其他配置）。继续？')) return
+  void postConfigAction('/api/config/reset')
+})
 $('cfg-save').addEventListener('click', async () => {
   const env = $('cfg-editor').value
   const r = await fetch('/api/config', {
@@ -622,6 +660,7 @@ $('log-clear').addEventListener('click', () => { $('log-box').innerHTML = ''; lo
 
 // ── 初始化 ──
 loadConfig()
+loadPresets()
 loadKbMeta()
 setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }, 1000)
 setInterval(() => { if (document.getElementById('page-overview').classList.contains('active')) renderChatFlow() }, 2000)

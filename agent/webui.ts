@@ -12,6 +12,70 @@ import { fileURLToPath } from 'node:url'
 const WEB_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'web')
 const ENV_PATH = join(fileURLToPath(new URL('.', import.meta.url)), '.env')
 
+// ── 配置预设模板（只改行为/节律相关键，保留密钥与基础设施配置）──
+const PRESET_DEFAULTS: Record<string, string> = {
+  RESPOND_MODE: 'auto',
+  PROACTIVE_GAP_MS: '0',
+  QUIET_HOURS: '',
+  BATCH_N: '5',
+  BATCH_T: '60000',
+  HL_IGNORE_SHORT_MIN_CHARS: '0',
+  HL_IGNORE_SHORT_PROB: '0',
+  HL_STATE_MODEL: 'true',
+  HL_STATE_INJECT: 'true',
+}
+
+const ENV_PRESETS: Array<{ name: string; label: string; description: string; patch: Record<string, string> }> = [
+  {
+    name: 'default',
+    label: '默认（推荐）',
+    description: '自动接话、不主动冒泡、近期状态开启',
+    patch: PRESET_DEFAULTS,
+  },
+  {
+    name: 'quiet',
+    label: '安静（只回 @）',
+    description: '仅 @/唤醒词触发，忽略敷衍短句',
+    patch: {
+      RESPOND_MODE: 'mention',
+      PROACTIVE_GAP_MS: '0',
+      HL_IGNORE_SHORT_MIN_CHARS: '2',
+      HL_IGNORE_SHORT_PROB: '0.5',
+    },
+  },
+  {
+    name: 'active',
+    label: '活跃（多接话）',
+    description: '自动接话，3 条/30 秒攒批，偶尔主动冒泡',
+    patch: {
+      RESPOND_MODE: 'auto',
+      PROACTIVE_GAP_MS: '1800000',
+      BATCH_N: '3',
+      BATCH_T: '30000',
+      HL_IGNORE_SHORT_MIN_CHARS: '0',
+      HL_IGNORE_SHORT_PROB: '0',
+    },
+  },
+  {
+    name: 'night',
+    label: '夜间静默',
+    description: '00:30–08:00 完全静默，不主动',
+    patch: {
+      QUIET_HOURS: '00:30-08:00',
+      PROACTIVE_GAP_MS: '0',
+    },
+  },
+  {
+    name: 'state-off',
+    label: '经典（关闭近期状态）',
+    description: '关闭精力/心情等状态模型与提示词注入',
+    patch: {
+      HL_STATE_MODEL: 'false',
+      HL_STATE_INJECT: 'false',
+    },
+  },
+]
+
 export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
   const clients = new Set<{ write: (s: string) => void }>()
 
@@ -176,6 +240,41 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
         return json(res, 200, { ok: true })
       }
 
+      // ── 预设模板列表 ──
+      if (path === '/api/config/presets') {
+        return json(res, 200, {
+          presets: ENV_PRESETS.map(({ name, label, description }) => ({ name, label, description })),
+        })
+      }
+
+      // ── 应用预设模板（写入 .env，重启后生效）──
+      if (path === '/api/config/preset' && req.method === 'POST') {
+        const body = await readBody(req)
+        const name = String(body.name || '')
+        const preset = ENV_PRESETS.find(p => p.name === name)
+        if (!preset) return json(res, 400, { error: 'unknown preset' })
+        const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+        const next = applyEnvPatch(raw, preset.patch)
+        const backup = writeEnvWithBackup(next)
+        return json(res, 200, {
+          ok: true,
+          env: next,
+          note: `已应用「${preset.label}」，重启 agent 后生效${backup ? `（已备份 ${backup.split('/').pop()}）` : ''}`,
+        })
+      }
+
+      // ── 恢复默认配置（仅触发/节律/近期状态相关项，保留密钥与基础设施配置）──
+      if (path === '/api/config/reset' && req.method === 'POST') {
+        const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+        const next = applyEnvPatch(raw, PRESET_DEFAULTS)
+        const backup = writeEnvWithBackup(next)
+        return json(res, 200, {
+          ok: true,
+          env: next,
+          note: `已恢复默认配置，重启 agent 后生效${backup ? `（已备份 ${backup.split('/').pop()}）` : ''}`,
+        })
+      }
+
       // ── 读取完整配置快照 ──
       if (path === '/api/config') {
         const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
@@ -267,4 +366,38 @@ function readBody(req: { on: (e: 'data' | 'end', cb: (c?: unknown) => void) => v
 
 function writeFileSyncSafe(path: string, content: string): void {
   writeFileSync(path, content, 'utf8')
+}
+
+/** 把 patch 合并进 .env：更新所有同名活跃行（保留行内注释），缺失的追加到末尾 */
+function applyEnvPatch(raw: string, patch: Record<string, string>): string {
+  const lines = raw ? raw.split(/\r?\n/) : []
+  const seen = new Set<string>()
+  const out = lines.map(line => {
+    const m = line.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/)
+    if (!m) return line
+    const key = m[2]
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) return line
+    seen.add(key)
+    const rest = m[3]
+    const hash = rest.indexOf(' #')
+    const comment = hash >= 0 ? rest.slice(hash) : ''
+    return `${m[1]}${key}=${patch[key]}${comment}`
+  })
+  for (const [key, value] of Object.entries(patch)) {
+    if (seen.has(key)) continue
+    if (out.length && out[out.length - 1] === '') out[out.length - 1] = `${key}=${value}`
+    else out.push(`${key}=${value}`)
+  }
+  return out.join('\n')
+}
+
+/** 写 .env 前先备份（备份文件含密钥，权限 600） */
+function writeEnvWithBackup(next: string): string {
+  let backup = ''
+  if (existsSync(ENV_PATH)) {
+    backup = `${ENV_PATH}.bak.${Date.now()}`
+    writeFileSync(backup, readFileSync(ENV_PATH, 'utf8'), { encoding: 'utf8', mode: 0o600 })
+  }
+  writeFileSyncSafe(ENV_PATH, next)
+  return backup
 }

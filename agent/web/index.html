@@ -239,6 +239,13 @@
             <button id="cfg-save" class="btn btn-sm btn-primary">保存</button>
           </div>
         </div>
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <span class="text-xs text-slate-500">预设模板</span>
+          <select id="cfg-preset" class="select select-sm select-bordered"></select>
+          <button id="cfg-apply-preset" class="btn btn-sm btn-primary">应用模板</button>
+          <button id="cfg-reset" class="btn btn-sm btn-ghost">恢复默认</button>
+          <span id="cfg-preset-note" class="text-xs text-slate-500"></span>
+        </div>
         <textarea id="cfg-editor" class="textarea textarea-bordered w-full h-[50vh] font-mono text-xs" spellcheck="false"></textarea>
         <div id="cfg-note" class="mt-2 text-xs text-emerald-400"></div>
         <div id="active-config" class="mt-4"></div>
