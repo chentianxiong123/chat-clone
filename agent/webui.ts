@@ -6,6 +6,7 @@ import { config } from './config.js'
 import { ragSearch, ragStatus } from './rag.js'
 import { callLlmRaw, listModels } from './llm.js'
 import { getUsageSummary } from './stats.js'
+import { listSceneSummaries } from './memory.js'
 import { fileURLToPath } from 'node:url'
 
 const WEB_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'web')
@@ -105,6 +106,17 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
       if (path === '/api/stats') {
         const hours = Number(url.searchParams.get('hours')) || 24
         return json(res, 200, getUsageSummary(hours))
+      }
+
+      // ── 记忆摘要 ──
+      if (path === '/api/memory') {
+        return json(res, 200, {
+          enabled: config.agent.memoryPersist,
+          maxTokens: config.agent.memoryMaxTokens,
+          threshold: config.agent.memoryCompressThreshold,
+          keepRecentRatio: config.agent.memoryKeepRecentRatio,
+          scenes: listSceneSummaries(),
+        })
       }
 
       // ── 手测 LLM ──

@@ -27,7 +27,7 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     const page = btn.dataset.page
     $('page-' + page).classList.add('active')
     if (page === 'stats') loadStats(currentRange)
-    if (page === 'persona') loadPersona()
+    if (page === 'persona') { loadPersona(); loadMemory() }
     if (page === 'kb') loadKbMeta()
   })
 })
@@ -254,6 +254,29 @@ async function loadPersona() {
     : (typeof shots === 'string' && shots.trim()
       ? shots.split('\n').map((s) => `<div class="glass round-lg p-2 text-[11px] font-mono whitespace-pre-wrap">${esc(s)}</div>`).join('')
       : '<div class="text-slate-600">未配置 few-shot 示例（PERSONA_DEMO_DIALOGS）</div>')
+}
+
+// ── 长期记忆 ──
+async function loadMemory() {
+  const r = await fetch('/api/memory')
+  const res = await r.json()
+  const box = $('memory-panels')
+  const cfgInfo = `<div class="text-[10px] text-slate-500 mb-2">持久化 ${res.enabled ? '✓' : '✗'} · 压缩阈值 ${res.maxTokens} tok × ${(res.threshold * 100).toFixed(0)}% · 保留最近 ${(res.keepRecentRatio * 100).toFixed(0)}%</div>`
+  if (!res.enabled) {
+    box.innerHTML = cfgInfo + '<div class="text-slate-600">记忆持久化已关闭（MEMORY_PERSIST=false）</div>'
+    return
+  }
+  const scenes = res.scenes || []
+  box.innerHTML = cfgInfo + (scenes.length
+    ? scenes.map((s) => `
+        <div class="glass round-lg p-3">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="font-mono text-sky-300">${esc(s.key)}</span>
+            <span class="text-slate-500">${s.dialogLen} 条 · ${fmtTime(s.updatedAt)}</span>
+          </div>
+          ${s.summary ? `<div class="mt-2 text-slate-300 whitespace-pre-wrap">📌 ${esc(s.summary)}</div>` : '<div class="mt-1 text-slate-600">尚未生成摘要</div>'}
+        </div>`).join('')
+    : '<div class="text-slate-600">暂无记忆，聊一会儿后这里会显示 LLM 摘要</div>')
 }
 
 // ── 知识库 ──

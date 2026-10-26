@@ -98,6 +98,17 @@ export const config = {
     segmentGapMaxMs: Number(process.env.SEGMENT_GAP_MAX_MS) || 1800,
     // 空行/纯空白行是否也单独成条（默认 false=跳过）
     segmentKeepBlank: process.env.SEGMENT_KEEP_BLANK === 'true',
+    // ── 上下文记忆 / 长期记忆（参考 AstrBot ContextManager）──
+    // 持久化开关：把每场景对话存 sqlite，重启不丢
+    memoryPersist: process.env.MEMORY_PERSIST !== 'false',
+    // 上下文最大 token（超过阈值触发 LLM 摘要压缩；0=关闭压缩）
+    memoryMaxTokens: Number(process.env.MEMORY_MAX_TOKENS) || 4096,
+    // 压缩触发阈值比例（占用超 maxTokens*此比例 触发）
+    memoryCompressThreshold: Number(process.env.MEMORY_COMPRESS_THRESHOLD) || 0.82,
+    // 压缩后保留最近上下文的比例（精确保留，老的进摘要）
+    memoryKeepRecentRatio: Number(process.env.MEMORY_KEEP_RECENT_RATIO) || 0.15,
+    // 每次压缩的摘要合并进长期记忆（AstrBot 注入 user 历史摘要对）
+    memorySummaryMerging: process.env.MEMORY_SUMMARY_MERGING !== 'false',
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {

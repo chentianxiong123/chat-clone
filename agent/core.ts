@@ -3,6 +3,9 @@ import { callLlm, type ChatMessage } from './llm.js'
 import { searchRag } from './rag.js'
 import { buildSystemPrompt } from './prompt.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
+import {
+  loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
+} from './memory.js'
 
 export const BATCH_N = config.batch.n
 export const BATCH_T = config.batch.t
@@ -216,7 +219,7 @@ export class AgentCore {
       const ragContext = await searchRag(ctx)
       const systemPrompt = buildSystemPrompt(ragContext, t)
 
-      const hist = (this.dialogs.get(key) ?? []).slice(-config.agent.maxHistory)
+      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -235,6 +238,7 @@ export class AgentCore {
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...hist, userMsg, assistantMsg].slice(-config.agent.maxHistory)
       this.dialogs.set(key, updated)
+      this.persist(key)
 
       // 发消息一定要慢：距上一条回复至少 cooldown
       const wait = this.lastReplyAt + p.cooldown - Date.now()
@@ -277,7 +281,7 @@ export class AgentCore {
     try {
       const ragContext = await searchRag(lastMsg)
       const systemPrompt = buildSystemPrompt(ragContext, t)
-      const hist = (this.dialogs.get(key) ?? []).slice(-config.agent.maxHistory)
+      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...hist, userMsg]
       const reply = await callLlm(messages)
@@ -287,14 +291,56 @@ export class AgentCore {
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
-      const updated: ChatMessage[] = [...(this.dialogs.get(key) ?? []), userMsg, assistantMsg].slice(-config.agent.maxHistory)
+      const updated: ChatMessage[] = [...(await this.dialogFor(key)), userMsg, assistantMsg].slice(-config.agent.maxHistory)
       this.dialogs.set(key, updated)
+      this.persist(key)
       recordGroupReply(id)
       console.log(`[Core] 主动说话 ${key}: ${reply}`)
       this.emit()
     } catch (err) {
       console.error('[Core] 主动说话错误:', err)
     }
+  }
+
+  /** 读场景对话：优先内存，内存无则从持久化加载（含摘要历史） */
+  private async dialogFor(key: SceneKey): Promise<ChatMessage[]> {
+    if (this.dialogs.has(key)) return this.dialogs.get(key)!
+    if (!config.agent.memoryPersist) return []
+    const { dialog, summary } = loadDialog(key)
+    // 摘要历史以"user 摘要 + assistant 收到"注入（AstrBot 方式）
+    let loaded = dialog
+    if (summary && dialog.length && dialog[0]?.role !== 'user') {
+      loaded = [
+        { role: 'user', content: `我们之前的对话摘要：${summary}`, time: Date.now() },
+        { role: 'assistant', content: '（收到，继续聊）', time: Date.now() },
+        ...dialog,
+      ]
+    }
+    this.dialogs.set(key, loaded)
+    return loaded
+  }
+
+  /** 持久化 + 触发 LLM 摘要压缩（超阈值时） */
+  private async persist(key: SceneKey): Promise<void> {
+    if (!config.agent.memoryPersist) return
+    const dialog = this.dialogs.get(key)
+    if (!dialog) return
+    const { summary } = loadDialog(key)
+    const maxTokens = config.agent.memoryMaxTokens
+    if (maxTokens > 0 && shouldCompress(dialog, maxTokens, config.agent.memoryCompressThreshold)) {
+      console.log(`[Memory] ${key} 上下文超限，触发 LLM 摘要压缩 (${countMessagesTokens(dialog)} tok)`)
+      const result = await compressDialog(
+        dialog,
+        summary,
+        maxTokens,
+        config.agent.memoryKeepRecentRatio,
+      )
+      this.dialogs.set(key, result.dialog)
+      saveDialog(key, result.dialog, result.summary)
+      console.log(`[Memory] ${key} 压缩完成，保留 ${result.dialog.length} 条`)
+      return
+    }
+    saveDialog(key, dialog, summary)
   }
 
   /** 回车分割发送：回复按换行拆成多条，逐条带随机间隔发出（模拟真人打字） */
@@ -337,17 +383,29 @@ export class AgentCore {
   getSnapshot(): AgentSnapshot {
     const now = Date.now()
     const scenes: Record<SceneKey, SceneView> = {}
-    const allKeys = new Set<SceneKey>([...this.dialogs.keys(), ...this.pending.keys()])
+    const allKeys = new Set<SceneKey>([
+      ...this.dialogs.keys(),
+      ...this.pending.keys(),
+      ...(config.agent.memoryPersist ? listSceneKeys() : []) as SceneKey[],
+    ])
     for (const key of allKeys) {
       const t: SceneType = key.startsWith('p:') ? 'private' : 'group'
       const id = Number(key.slice(2))
+      const mem = config.agent.memoryPersist ? loadDialog(key) : { dialog: [], summary: '' }
+      const memDialog = mem.summary && !mem.dialog.some(m => m.role === 'user' && m.content.startsWith('我们之前的对话摘要'))
+        ? [
+            { role: 'user' as const, content: `我们之前的对话摘要：${mem.summary}`, time: Date.now() },
+            { role: 'assistant' as const, content: '（收到，继续聊）', time: Date.now() },
+            ...mem.dialog,
+          ]
+        : mem.dialog
       scenes[key] = {
         scene: t,
         id,
         key,
         title: t === 'private' ? `私聊 ${id}` : `群 ${id}`,
         pending: this.pending.get(key)?.lines.slice(-10) ?? [],
-        dialog: (this.dialogs.get(key) ?? []).slice(-config.agent.maxHistory),
+        dialog: (this.dialogs.get(key) ?? memDialog).slice(-config.agent.maxHistory),
         timerActive: this.timers.has(key),
         timerDeadlineAt: this.timers.get(key)?.deadlineAt ?? null,
         lastReplyAt: this.lastReplyAt,
@@ -388,12 +446,17 @@ export class AgentCore {
       this.pending.delete(key)
       const t = this.timers.get(key)
       if (t) { clearTimeout(t.handle); this.timers.delete(key) }
+      if (config.agent.memoryPersist) clearDialogDb(key)
       console.log(`[Core] 清空场景 ${key} 的会话记忆`)
     } else {
+      const keys = [...this.dialogs.keys()]
       this.dialogs.clear()
       this.pending.clear()
       for (const t of this.timers.values()) clearTimeout(t.handle)
       this.timers.clear()
+      if (config.agent.memoryPersist) {
+        for (const k of keys) clearDialogDb(k)
+      }
       console.log('[Core] 清空全部会话记忆')
     }
     this.emit()
