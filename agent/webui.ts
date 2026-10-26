@@ -86,6 +86,7 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
           batch: { n: config.batch.n, t: config.batch.t },
           persona: config.persona,
           agent: config.agent,
+          humanlike: config.humanlike,
           ragConfig: {
             dbPath: config.rag.dbPath,
             embedEndpoint: config.rag.embedEndpoint,

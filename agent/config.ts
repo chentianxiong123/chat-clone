@@ -1,3 +1,14 @@
+function clamp01(x: number): number { return Math.min(1, Math.max(0, x)) }
+
+/** 解析半醒时段："23:00-00:30@0.5,02:00-06:00@0.8" → [{start,end,dormantProb}] */
+function parseDrowsy(raw: string): { start: string; end: string; prob: number }[] {
+  return raw.split(',').map(s => s.trim()).filter(Boolean).map(s => {
+    const m = s.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})(?:@([\d.]+))?$/)
+    if (!m) return null
+    return { start: m[1], end: m[2], prob: m[3] ? Math.min(1, Math.max(0, Number(m[3]))) : 0.5 }
+  }).filter((x): x is { start: string; end: string; prob: number } => !!x)
+}
+
 export const config = {
   // ── NapCat 连接 ───────────────────────────────────────────────────────────
   napcat: {
@@ -71,33 +82,15 @@ export const config = {
   },
   agent: {
     maxHistory: Number(process.env.MAX_HISTORY) || 40,
-    replyCooldown: Number(process.env.REPLY_COOLDOWN) || 25_000,
     respondMode: process.env.RESPOND_MODE || 'auto', // "auto" | "mention"
-    // 私聊独立策略：攒批条数/时间（默认1条即回，秒回）
+    // 私聊独立策略：攒批条数/时间
     privateBatchN: Number(process.env.PRIVATE_BATCH_N) || 1,
     privateBatchT: Number(process.env.PRIVATE_BATCH_T) || 30_000,
-    privateReplyCooldown: Number(process.env.PRIVATE_REPLY_COOLDOWN) || 10_000,
-    // 群聊回复概率 0~1（1=必回，0.5=50%概率沉默，模拟真人不想理）
-    groupReplyProb: Number(process.env.GROUP_REPLY_PROB) || 1.0,
-    // 私聊回复概率
-    privateReplyProb: Number(process.env.PRIVATE_REPLY_PROB) || 1.0,
-    // 调整后 min(max(x,0),1)
-    // 主动说话：某个场景沉寂 minGapMs 后主动冒泡（0=关闭）
-    proactiveGapMs: Number(process.env.PROACTIVE_GAP_MS) || 0,
-    // 夜间防打扰 [hh:mm–hh:mm] 不响（空串=关闭）
-    quietHours: process.env.QUIET_HOURS || '',
     // 只处理白名单（空=全部；格式逗号分隔，g:群号 / p:QQ号 或裸群号）
     allowScenes: (process.env.ALLOW_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
     // 黑名单（同格式；白名单优先）
     denyScenes: (process.env.DENY_SCENES || '').split(',').map(s => s.trim()).filter(Boolean),
-    // ── 回车分割逐条发送（模拟真人一条条打字发出）──
-    // 回复里每个换行(回车)拆成独立一条消息，逐条带间隔发送
-    segmentOnNewline: process.env.SEGMENT_ON_NEWLINE !== 'false',
-    // 每条消息之间的间隔(ms)（随机在 [min,max] 取，模拟打字节奏）
-    segmentGapMinMs: Number(process.env.SEGMENT_GAP_MIN_MS) || 500,
-    segmentGapMaxMs: Number(process.env.SEGMENT_GAP_MAX_MS) || 1800,
-    // 空行/纯空白行是否也单独成条（默认 false=跳过）
-    segmentKeepBlank: process.env.SEGMENT_KEEP_BLANK === 'true',
+    // 注意：拟人相关参数（回复概率/冷却/反应/打字/风格/作息）已全部收敛到 humanlike 区块
     // ── 上下文记忆 / 长期记忆（参考 AstrBot ContextManager）──
     // 持久化开关：把每场景对话存 sqlite，重启不丢
     memoryPersist: process.env.MEMORY_PERSIST !== 'false',
@@ -109,6 +102,86 @@ export const config = {
     memoryKeepRecentRatio: Number(process.env.MEMORY_KEEP_RECENT_RATIO) || 0.15,
     // 每次压缩的摘要合并进长期记忆（AstrBot 注入 user 历史摘要对）
     memorySummaryMerging: process.env.MEMORY_SUMMARY_MERGING !== 'false',
+  },
+  // ── 拟人画像 HumanProfile（A~E 全维度，全部可配置）────────────────────────
+  // 目标：每个参数都能从「原始聊天数据」统计得出（见 profile.ts buildProfileFromStats）
+  // source 目前固定 env；后续实现数据导入后切换为 db:<统计表>
+  humanlike: {
+    source: process.env.HL_PROFILE_SOURCE || 'env',
+    // ── A. 触发应答 —— 回不回 ──
+    replyProb: {
+      // 群聊被点名+正常消息；被 @/唤醒时必应（不打折扣）
+      group: clamp01(Number(process.env.GROUP_REPLY_PROB) || 1.0),
+      private: clamp01(Number(process.env.PRIVATE_REPLY_PROB) || 1.0),
+    },
+    // 太短的敷衍消息直接忽略（如"好的""嗯"），真人常当没看见
+    ignoreShort: {
+      minChars: Number(process.env.HL_IGNORE_SHORT_MIN_CHARS) || 0, // 低于此长度 视为无意义
+      prob: clamp01(Number(process.env.HL_IGNORE_SHORT_PROB) || 0),  // 命中后沉默概率
+    },
+    // ── B. 反应与节奏 —— 多久回 ──
+    react: {
+      minMs: Number(process.env.REPLY_REACT_MIN_MS) || 2500,
+      maxMs: Number(process.env.REPLY_REACT_MAX_MS) || 8000,
+    },
+    cooldown: {
+      groupMs: Number(process.env.REPLY_COOLDOWN) || 25_000,
+      privateMs: Number(process.env.PRIVATE_REPLY_COOLDOWN) || 10_000,
+    },
+    // 刷屏抑制：窗口内连续回复超 maxReplies 次 → 额外冷却（模拟真人被盯烦了会冷场）
+    burst: {
+      maxReplies: Number(process.env.HL_BURST_MAX) || 3,
+      windowMs: Number(process.env.HL_BURST_WINDOW_MS) || 180_000,
+      extraCooldownMs: Number(process.env.HL_BURST_EXTRA_COOLDOWN_MS) || 60_000,
+    },
+    // ── C. 打字节奏 —— 怎么发 ──
+    typing: {
+      // 每秒打字字符数（随机区间）→ 单条耗时 = 字数/速度
+      charsPerSec: {
+        min: Number(process.env.HL_TYPING_CPS_MIN) || 3,
+        max: Number(process.env.HL_TYPING_CPS_MAX) || 9,
+      },
+      // 条间停顿（不含打字本身）
+      segGap: {
+        minMs: Number(process.env.SEGMENT_GAP_MIN_MS) || 900,
+        maxMs: Number(process.env.SEGMENT_GAP_MAX_MS) || 3200,
+      },
+      // 一次回复最多拆成几条（超出合并），真人不会狂刷几十条
+      maxSegments: Number(process.env.HL_MAX_SEGMENTS) || 6,
+      // 第一条发出前的短暂迟疑
+      firstDelayMs: Number(process.env.SEGMENT_FIRST_DELAY_MS) || 500,
+      // 按换行拆分逐条发送
+      onNewline: process.env.SEGMENT_ON_NEWLINE !== 'false',
+      // 空行是否也单独成条（默认跳过）
+      keepBlank: process.env.SEGMENT_KEEP_BLANK === 'true',
+    },
+    // ── D. 话术风格 —— 说成什么样（LLM 输出后轻量后处理）──
+    style: {
+      // 回复超长自动收敛（防小作文），超出的在句子边界截断+省略号
+      maxChars: Number(process.env.HL_STYLE_MAX_CHARS) || 120,
+      // 句尾偶发表情
+      emojiProb: clamp01(Number(process.env.HL_STYLE_EMOJI_PROB) || 0.15),
+      emojis: (process.env.HL_STYLE_EMOJIS || '😂,😅,🤔,😏,🤤,💦').split(',').map(s => s.trim()).filter(Boolean),
+      // 语气词/口头禅（开头插入）
+      fillerProb: clamp01(Number(process.env.HL_STYLE_FILLER_PROB) || 0.2),
+      fillers: (process.env.HL_STYLE_FILLERS || 'emm,啊这,……,2333,离谱').split(',').map(s => s.trim()).filter(Boolean),
+      // 偶尔错别字（同音/形近替换）；格式 "对词=错词" 逗号分隔
+      typoProb: clamp01(Number(process.env.HL_STYLE_TYPO_PROB) || 0.03),
+      typoMap: String(process.env.HL_STYLE_TYPOS || '在=再,吗=嘛,呢=呐,的=得').split(',').map(p => p.trim()).filter(Boolean)
+        .map(p => { const [from, to] = p.split('='); return from && to ? { from: from.trim(), to: to.trim() } : null })
+        .filter((x): x is { from: string; to: string } => !!x),
+      // 偶尔"回敬"对方最后一个词（复读/接话）
+      echoProb: clamp01(Number(process.env.HL_STYLE_ECHO_PROB) || 0.08),
+    },
+    // ── E. 日程节律 —— 什么时候活 ──
+    schedule: {
+      // 完全静默时段 [hh:mm-hh:mm]（空=关闭）
+      quietHours: process.env.QUIET_HOURS || '',
+      // 半醒时段：start-end@忽略概率, 多段逗号分隔；如 23:00-00:30@0.5 深夜低活跃
+      drowsy: parseDrowsy(process.env.HL_DROWSY || ''),
+      // 某场景沉寂超过此间隔则主动冒泡（0=关闭）
+      proactiveGapMs: Number(process.env.PROACTIVE_GAP_MS) || 0,
+    },
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {

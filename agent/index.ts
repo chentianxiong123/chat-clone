@@ -75,7 +75,7 @@ core.onReply = async (scene, id, reply) => {
 }
 
 // 主动说话心跳（可选）
-if (config.agent.proactiveGapMs > 0) {
+if (config.humanlike.schedule.proactiveGapMs > 0) {
   setInterval(() => { void core.proactiveTick() }, 60_000)
 }
 

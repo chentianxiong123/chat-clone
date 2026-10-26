@@ -467,6 +467,12 @@ async function loadConfig() {
 function renderActiveConfig(cfg, rag) {
   const panels = document.getElementById('active-config')
   if (!panels) return
+  const hl = cfg.humanlike || {
+    replyProb: { group: 1, private: 1 }, react: { minMs: 0, maxMs: 0 },
+    cooldown: { groupMs: 0, privateMs: 0 }, typing: { charsPerSec: { min: 0, max: 0 }, segGap: { minMs: 0, maxMs: 0 }, maxSegments: 0 },
+    style: { maxChars: 0, emojiProb: 0, fillerProb: 0, typoProb: 0 },
+    schedule: { quietHours: '', drowsy: [], proactiveGapMs: 0 },
+  }
   panels.innerHTML = `
     <div class="grid grid-cols-2 gap-3 text-xs">
       <div class="glass p-3 round-xl">
@@ -487,7 +493,27 @@ function renderActiveConfig(cfg, rag) {
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">攒批 / 冷却</div>
         <div class="font-mono">N=${cfg.batch.n} T=${(cfg.batch.t/1000).toFixed(0)}s</div>
-        <div class="text-slate-600">COOLDOWN ${(cfg.agent.replyCooldown/1000).toFixed(0)}s</div>
+        <div class="text-slate-600">COOLDOWN ${(hl.cooldown.groupMs/1000).toFixed(0)}s / 私 ${(hl.cooldown.privateMs/1000).toFixed(0)}s</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 反应</div>
+        <div class="font-mono">${(hl.react.minMs/1000).toFixed(1)}~${(hl.react.maxMs/1000).toFixed(1)}s</div>
+        <div class="text-slate-600">回复率 群${(hl.replyProb.group*100).toFixed(0)}% / 私${(hl.replyProb.private*100).toFixed(0)}%</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 打字</div>
+        <div class="font-mono">${hl.typing.charsPerSec.min}~${hl.typing.charsPerSec.max} 字/秒</div>
+        <div class="text-slate-600">间隔 ${(hl.typing.segGap.minMs/1000).toFixed(1)}~${(hl.typing.segGap.maxMs/1000).toFixed(1)}s · 最多${hl.typing.maxSegments}条</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 风格</div>
+        <div class="font-mono">≤${hl.style.maxChars}字</div>
+        <div class="text-slate-600">表情${(hl.style.emojiProb*100).toFixed(0)}% 语气词${(hl.style.fillerProb*100).toFixed(0)}% 错字${(hl.style.typoProb*100).toFixed(0)}%</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 节律</div>
+        <div class="font-mono">${hl.schedule.quietHours ? esc(hl.schedule.quietHours) : '全天在线'}</div>
+        <div class="text-slate-600">半醒 ${hl.schedule.drowsy.length}段 · 主动 ${hl.schedule.proactiveGapMs ? (hl.schedule.proactiveGapMs/60000).toFixed(0)+'min' : '关'}</div>
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">记忆 / 触发</div>
