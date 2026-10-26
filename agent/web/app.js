@@ -461,10 +461,10 @@ async function loadConfig() {
   const r = await fetch('/api/config')
   const res = await r.json()
   $('cfg-editor').value = res.env
-  if (res.active) renderActiveConfig(res.active, res.rag)
+  if (res.active) renderActiveConfig(res.active, res.rag, res.profileMeta)
 }
 
-function renderActiveConfig(cfg, rag) {
+function renderActiveConfig(cfg, rag, profileMeta) {
   const panels = document.getElementById('active-config')
   if (!panels) return
   const hl = cfg.humanlike || {
@@ -514,6 +514,11 @@ function renderActiveConfig(cfg, rag) {
         <div class="text-slate-500 uppercase mb-1">拟人 · 节律</div>
         <div class="font-mono">${hl.schedule.quietHours ? esc(hl.schedule.quietHours) : '全天在线'}</div>
         <div class="text-slate-600">半醒 ${hl.schedule.drowsy.length}段 · 主动 ${hl.schedule.proactiveGapMs ? (hl.schedule.proactiveGapMs/60000).toFixed(0)+'min' : '关'}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">画像来源</div>
+        <div class="font-mono">${esc(hl.source || 'env')}</div>
+        <div class="text-slate-600">${profileMeta?.generatedAt ? '挖掘 ' + esc(profileMeta.generatedAt.slice(0, 16).replace('T', ' ')) + ' · 本人' + (profileMeta.sample?.selfText ?? 0) + '条' : '未加载 profile.json'}</div>
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">记忆 / 触发</div>

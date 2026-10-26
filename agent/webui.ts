@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import { AgentCore } from './core.js'
-import { config } from './config.js'
+import { config, minedProfileMeta } from './config.js'
 import { ragSearch, ragStatus } from './rag.js'
 import { callLlmRaw, listModels } from './llm.js'
 import { getUsageSummary } from './stats.js'
@@ -184,6 +184,7 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
           env: raw,
           active: config,
           rag,
+          profileMeta: minedProfileMeta,
         })
       }
 

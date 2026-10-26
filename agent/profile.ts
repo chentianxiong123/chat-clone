@@ -30,16 +30,132 @@ export type HumanlikeProfileOverride = Partial<{
   schedule: Partial<HumanlikeProfile['schedule']>
 }>
 
+/** mine.ts 产出的标准化统计（纯数字/字符串，便于落盘与复算） */
+export interface MinedStats {
+  /** 对方发消息 → 本人回复 的延迟（秒） */
+  replyLatencySec: { p10: number; p50: number; p90: number }
+  /** 本人单条消息字数分位 */
+  selfMsgChars: { p50: number; p80: number; p90: number; p95: number }
+  /** 本人一轮（连发合并）总字数分位 */
+  turnChars: { p50: number; p80: number; p90: number }
+  /** 本人一次连发条数分位 */
+  burstLen: { p50: number; p80: number; p90: number }
+  /** 连发内部相邻两条的间隔（秒） */
+  burstGapSec: { p25: number; p50: number; p75: number; p90: number }
+  /** 连发期间的打字速度（字/秒，已剔除异常间隔） */
+  typingCps: number
+  /** 本人消息含 emoji 的比例 */
+  emojiRate: number
+  /** 高频 emoji（降序） */
+  emojis: string[]
+  /** ≤3 字短句占比 */
+  shortRate: number
+  /** 高频口头语（降序） */
+  fillers: string[]
+  /** 24 小时活跃度，按峰值归一化 0~1 */
+  hourRatio: number[]
+  /** 对方一轮（连发合并）被本人在 5 分钟内回复的比例 */
+  replyRate: number
+  totalText: number
+  selfText: number
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+const safe = (v: number, fallback = 0) => (Number.isFinite(v) ? v : fallback)
+const round2 = (v: number) => Math.round(v * 100) / 100
+const hh = (h: number) => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`
+
+/** 找出 24 小时里最长的低活跃连续区间（支持跨零点），用于 quietHours */
+function longestLowBlock(ratios: number[], threshold: number): string {
+  const n = 24
+  const low = Array.from({ length: n }, (_, i) => safe(ratios[i], 1) < threshold)
+  let bestStart = -1
+  let bestLen = 0
+  for (let start = 0; start < n; start++) {
+    if (!low[start]) continue
+    let len = 0
+    while (len < n && low[(start + len) % n]) len++
+    if (len > bestLen) {
+      bestLen = len
+      bestStart = start
+    }
+  }
+  if (bestStart < 0) return '03:00-08:00'
+  if (bestLen >= n) return '00:00-00:00'
+  return `${hh(bestStart)}-${hh(bestStart + bestLen)}`
+}
+
+/** 低活跃但未静默的时段 → 犯困区间（概率随活跃度降低而升高） */
+function drowsyRanges(
+  ratios: number[],
+  lo: number,
+  hi: number,
+): { start: string; end: string; prob: number }[] {
+  const n = 24
+  const drowsy = Array.from({ length: n }, (_, i) => {
+    const r = safe(ratios[i], 1)
+    return r >= lo && r < hi ? r : null
+  })
+  const out: { start: string; end: string; prob: number }[] = []
+  let i = 0
+  while (i < n) {
+    if (drowsy[i] === null) {
+      i++
+      continue
+    }
+    let j = i
+    let sum = 0
+    while (j < n && drowsy[j] !== null) {
+      sum += drowsy[j] as number
+      j++
+    }
+    const avg = sum / (j - i)
+    out.push({ start: hh(i), end: hh(j), prob: round2(clamp(0.7 * (1 - avg), 0.15, 0.8)) })
+    i = j
+  }
+  return out
+}
+
 /**
- * 从统计数据构建画像覆盖。
- * 当前为骨架：接口就位，数据挖掘实现见下阶段（导入原始库 → 输出 HumanlikeProfileOverride）。
- * TODO(data-profile): 实现各字段统计算法（见文件头蓝图）
+ * 从统计数据构建画像覆盖（A~E 维）。
+ * 只覆盖能从数据可靠推出的字段；cooldown / typo / echo / 私聊概率保持 env。
+ * 所有值都做合理区间收敛，避免脏数据把 bot 调成秒回/话痨/静默。
  */
-export function buildProfileFromStats(rawStats: unknown): HumanlikeProfileOverride {
-  // TODO: rawStats 为标准化的统计组（时间戳/长度/词频/应答比等），
-  // 计算后返回 HumanlikeProfileOverride 覆盖 env 默认值。
-  void rawStats
-  return {}
+export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverride {
+  const lat = stats.replyLatencySec
+  const reactMin = clamp(Math.round(safe(lat.p10) * 1000), 2000, 6000)
+  const reactMax = clamp(Math.round(safe(lat.p90) * 1000), reactMin + 2000, 20000)
+
+  const cps = clamp(safe(stats.typingCps), 2, 8)
+  const cpsMin = clamp(Math.round(cps * 0.8), 2, 10)
+  const cpsMax = Math.max(cpsMin + 1, clamp(Math.round(cps * 1.5), 3, 14))
+
+  const segMin = clamp(Math.round(safe(stats.burstGapSec.p25) * 1000), 300, 5000)
+  const segMax = clamp(Math.round(safe(stats.burstGapSec.p75) * 1000), segMin + 300, 15000)
+  const maxSeg = clamp(Math.round(safe(stats.burstLen.p90)), 2, 6)
+  const maxChars = clamp(Math.round(safe(stats.turnChars.p90) * 1.2), 60, 240)
+
+  return {
+    react: { minMs: reactMin, maxMs: reactMax },
+    typing: {
+      charsPerSec: { min: cpsMin, max: cpsMax },
+      segGap: { minMs: segMin, maxMs: segMax },
+      maxSegments: maxSeg,
+    },
+    style: {
+      maxChars,
+      emojiProb: round2(clamp(safe(stats.emojiRate) * 1.5, 0.01, 0.2)),
+      emojis: stats.emojis.slice(0, 6),
+      fillerProb: round2(clamp(safe(stats.shortRate) * 0.8, 0, 0.35)),
+      fillers: stats.fillers.slice(0, 8),
+    },
+    schedule: {
+      quietHours: longestLowBlock(stats.hourRatio, 0.03),
+      drowsy: drowsyRanges(stats.hourRatio, 0.03, 0.2),
+    },
+    replyProb: { group: round2(clamp(safe(stats.replyRate), 0.25, 0.95)) },
+    burst: { maxReplies: clamp(Math.round(safe(stats.burstLen.p90)), 2, 6) },
+  }
 }
 
 // ── 工具 ────────────────────────────────────────────────────────────────────
@@ -76,7 +192,9 @@ export function applyStyle(reply: string, ctx?: string): string {
   if (chance(st.fillerProb) && st.fillers.length) {
     const head = out.trimStart()
     const pad = out.slice(0, -head.length)
-    out = pad + pick(st.fillers) + (head.startsWith(' ') ? '' : ' ') + head
+    const filler = pick(st.fillers)
+    const sep = /^[A-Za-z0-9]/.test(filler) ? ' ' : ''
+    out = pad + filler + sep + head
   }
 
   // 3) 偶尔错别字（只替换一处，避免满屏违和）

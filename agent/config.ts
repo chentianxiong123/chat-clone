@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 function clamp01(x: number): number { return Math.min(1, Math.max(0, x)) }
 
 /** 解析半醒时段："23:00-00:30@0.5,02:00-06:00@0.8" → [{start,end,dormantProb}] */
@@ -200,3 +204,49 @@ export const config = {
 }
 
 export type Config = typeof config
+
+// ── 数据挖掘画像（data/profile.json）──────────────────────────────────────
+// HL_PROFILE_SOURCE=json 强制读取；auto 有则读、无则用 env；env 忽略文件。
+const PROFILE_PATH = join(dirname(fileURLToPath(new URL('.', import.meta.url))), 'data', 'profile.json')
+
+export type MinedProfileMeta = {
+  generatedAt?: string
+  self?: string
+  files?: string[]
+  sample?: Record<string, number>
+  stats?: Record<string, unknown>
+}
+export let minedProfileMeta: MinedProfileMeta | null = null
+
+function deepMerge(target: Record<string, unknown>, src: unknown): void {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return
+  for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+    if (v === undefined) continue
+    const cur = target[k]
+    if (v && typeof v === 'object' && !Array.isArray(v) && cur && typeof cur === 'object' && !Array.isArray(cur)) {
+      deepMerge(cur as Record<string, unknown>, v)
+    } else {
+      target[k] = v
+    }
+  }
+}
+
+if (config.humanlike.source === 'json' || config.humanlike.source === 'auto') {
+  try {
+    if (existsSync(PROFILE_PATH)) {
+      const raw = JSON.parse(readFileSync(PROFILE_PATH, 'utf8')) as MinedProfileMeta & { override?: unknown }
+      deepMerge(config.humanlike as unknown as Record<string, unknown>, raw.override ?? raw)
+      minedProfileMeta = {
+        generatedAt: raw.generatedAt,
+        self: raw.self,
+        files: raw.files,
+        sample: raw.sample,
+        stats: raw.stats,
+      }
+    } else if (config.humanlike.source === 'json') {
+      console.warn(`[config] HL_PROFILE_SOURCE=json 但未找到 ${PROFILE_PATH}，回退 env`)
+    }
+  } catch (e) {
+    console.warn(`[config] 加载画像失败，回退 env: ${(e as Error).message}`)
+  }
+}

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --env-file=.env --import tsx index.ts"
+    "start": "node --env-file=.env --import tsx index.ts",
+    "mine": "node --env-file=.env --import tsx mine.ts"
   },
   "dependencies": {
     "node-napcat-ts": "^0.4.25",
