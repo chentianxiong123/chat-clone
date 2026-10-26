@@ -252,15 +252,29 @@ export function splitLongSegment(line: string, maxChars: number): string[] {
 const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const chance = (p: number): boolean => Math.random() < p
 
+export interface StyleBias {
+  emojiProb?: number
+  fillerProb?: number
+  typoProb?: number
+  echoProb?: number
+  maxChars?: number
+}
+
 /**
  * 对 LLM 输出的回复做"话术风格"轻量后处理（D 维）。
  * 只做小概率修饰与收敛，不改内容、不抢 LLM 的语境。
  * @param reply LLM 原始输出
  * @param ctx 对方消息上下文（用于 echo 回敬关键词，可空）
+ * @param bias 近期状态带来的风格偏置（概率/长度），不传则用 env 配置
  */
-export function applyStyle(reply: string, ctx?: string): string {
+export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): string {
   const st = config.humanlike.style
   if (!reply.trim()) return reply
+  const emojiProb = bias?.emojiProb ?? st.emojiProb
+  const fillerProb = bias?.fillerProb ?? st.fillerProb
+  const typoProb = bias?.typoProb ?? st.typoProb
+  const echoProb = bias?.echoProb ?? st.echoProb
+  const maxChars = bias?.maxChars ?? st.maxChars
   let out = reply
   const lines = out.split('\n')
   const lastNonBlankIdx = (() => {
@@ -269,7 +283,7 @@ export function applyStyle(reply: string, ctx?: string): string {
   })()
 
   // 1) 句尾偶发表情
-  if (chance(st.emojiProb) && st.emojis.length && lastNonBlankIdx >= 0) {
+  if (chance(emojiProb) && st.emojis.length && lastNonBlankIdx >= 0) {
     const i = lastNonBlankIdx
     // 该行已以表情符号结尾则不再加
     if (!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]$/u.test(lines[i].trim())) {
@@ -279,7 +293,7 @@ export function applyStyle(reply: string, ctx?: string): string {
   }
 
   // 2) 开头插入语气词（口头禅）
-  if (chance(st.fillerProb) && st.fillers.length) {
+  if (chance(fillerProb) && st.fillers.length) {
     const head = out.trimStart()
     const pad = out.slice(0, -head.length)
     const filler = pick(st.fillers)
@@ -288,7 +302,7 @@ export function applyStyle(reply: string, ctx?: string): string {
   }
 
   // 3) 偶尔错别字（只替换一处，避免满屏违和）
-  if (chance(st.typoProb) && st.typoMap.length) {
+  if (chance(typoProb) && st.typoMap.length) {
     for (const { from, to } of st.typoMap) {
       if (out.includes(from)) {
         out = out.replace(from, to)
@@ -298,17 +312,17 @@ export function applyStyle(reply: string, ctx?: string): string {
   }
 
   // 4) 长度收敛：超 maxChars 截断到句子边界 + 省略号（防小作文）
-  if (out.length > st.maxChars) {
-    const slice = out.slice(0, st.maxChars)
+  if (out.length > maxChars) {
+    const slice = out.slice(0, maxChars)
     const cutAt = Math.max(
       slice.lastIndexOf('。'), slice.lastIndexOf('！'), slice.lastIndexOf('？'),
       slice.lastIndexOf('\n'),
     )
-    out = (cutAt > st.maxChars * 0.5 ? slice.slice(0, cutAt + 1) : slice) + '……'
+    out = (cutAt > maxChars * 0.5 ? slice.slice(0, cutAt + 1) : slice) + '……'
   }
 
   // 5) 回敬对方关键词（复读/接话）
-  if (chance(st.echoProb) && ctx) {
+  if (chance(echoProb) && ctx) {
     const kw = lastWord(ctx)
     if (kw && kw.length >= 2 && !out.includes(kw)) {
       out = out.trimEnd() + `，就你说的${kw}呗`

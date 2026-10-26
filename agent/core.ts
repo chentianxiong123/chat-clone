@@ -2,11 +2,15 @@ import { config } from './config.js'
 import { callLlm, type ChatMessage } from './llm.js'
 import { searchRag } from './rag.js'
 import { buildSystemPrompt, buildRagContextMessage } from './prompt.js'
-import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb } from './profile.js'
+import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
   loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
 } from './memory.js'
+import {
+  loadState, saveState, resetState, onMessage, onReply, decayState, computeModifiers,
+  buildStateContextMessage, stateView, type RecentState, type RecentStateView, type StateModifiers,
+} from './state.js'
 
 export const BATCH_N = config.batch.n
 export const BATCH_T = config.batch.t
@@ -49,6 +53,7 @@ export interface AgentSnapshot {
   privateBatchN: number
   privateBatchT: number
   respondMode: string
+  recentState: RecentStateView
   scenes: Record<SceneKey, SceneView>
   // 兼容旧字段（前端过渡用）
   groups: Record<string, SceneView>
@@ -58,6 +63,7 @@ type Listener = (snap: AgentSnapshot) => void
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 const chance = (p: number): boolean => Math.random() < p
+const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
 
 export const sceneKey = (t: SceneType, id: number): SceneKey => `${t === 'private' ? 'p' : 'g'}:${id}`
 
@@ -150,9 +156,17 @@ export class AgentCore {
   private lastSelfAt = new Map<SceneKey, number>()
   /** 近期回复时间戳（刷屏抑制 / burst 用） */
   private replyHistory: number[] = []
+  /** 近期状态（全局：精力/心情/耐心/社交/烦躁/兴趣…） */
+  private recentState: RecentState
+  private stateKey = 'global'
+  private lastStateSaveAt = 0
   private listeners = new Set<Listener>()
   connected = false
   connError?: string
+
+  constructor() {
+    this.recentState = loadState(this.stateKey)
+  }
 
   /** 协议端接线：core 计算出回复后回调这里发消息 */
   onReply?: (scene: SceneType, id: number, text: string) => Promise<void>
@@ -182,6 +196,10 @@ export class AgentCore {
     const p = paramFor(t)
     const woke = !needWake(t, msg)
     g.woke = g.woke || (t === 'group' && woke)
+
+    // 近期状态：先更新（忽略/半醒的消息也算看到了），影响后续概率与语气
+    this.recentState = onMessage(this.recentState, text, Date.now(), { atBot: msg.atBot, woke })
+    this.persistState()
 
     // 敷衍短消息忽略（真人经常"好的""嗯"当没看见）
     const ignore = config.humanlike.ignoreShort
@@ -248,9 +266,32 @@ export class AgentCore {
       p *= rp.hourly[new Date().getHours()]
     }
     if (batchSize >= rp.batchPenalty.threshold) p *= rp.batchPenalty.factor
+    // 近期状态：精力/心情/耐心/社交/忙碌/烦躁 → 回复倾向
+    p *= computeModifiers(this.recentState).replyProb
     // 群聊被 @ / 叫名字：必回（状态/时段/连发惩罚都不打折）
     if (woke && t === 'group') p = 1
     return Math.max(0, Math.min(1, p))
+  }
+
+  /** 状态落库（节流，避免每条消息都写 sqlite） */
+  private persistState(force = false): void {
+    const now = Date.now()
+    if (!force && now - this.lastStateSaveAt < 2000) return
+    this.lastStateSaveAt = now
+    saveState(this.recentState, this.stateKey)
+  }
+
+  /** 状态 → 话术风格偏置（表情/语气词/错字/长度） */
+  private styleBias(mods: StateModifiers): StyleBias | undefined {
+    if (!config.humanlike.recentState.effects.style) return undefined
+    const st = config.humanlike.style
+    return {
+      emojiProb: clamp01(st.emojiProb * mods.emoji),
+      fillerProb: clamp01(st.fillerProb * mods.filler),
+      typoProb: clamp01(st.typoProb * mods.typo),
+      echoProb: clamp01(st.echoProb * mods.echo),
+      maxChars: Math.max(20, Math.round(st.maxChars * mods.styleLength)),
+    }
   }
 
   // ── 触发一轮回复 ──────────────────────────────────────────────────────
@@ -279,21 +320,25 @@ export class AgentCore {
         return
       }
 
+      const mods = computeModifiers(this.recentState)
       const ragContext = await searchRag(ctx)
       const systemPrompt = buildSystemPrompt(t)
       const ragMsg = buildRagContextMessage(ragContext)
 
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
+
+      // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
+      // 累/忙/烦时更慢；状态消息在延迟后构建，尽量新鲜
+      await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+      const stateMsg = buildStateContextMessage(this.recentState)
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
         ...(ragMsg ? [ragMsg] : []),
+        ...(stateMsg ? [stateMsg] : []),
         userMsg,
       ]
-
-      // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
-      await sleep(sampleReactMs())
 
       const raw = await callLlm(messages)
       if (!raw) {
@@ -302,7 +347,7 @@ export class AgentCore {
         return
       }
       // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
-      const reply = applyStyle(raw, ctx)
+      const reply = applyStyle(raw, ctx, this.styleBias(mods))
       console.log(`[Core] 回复 ${key}: ${reply}`)
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
@@ -316,6 +361,8 @@ export class AgentCore {
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
+      this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
+      this.persistState(true)
       this.noteReply()
       recordGroupReply(id)
       this.emit()
@@ -330,11 +377,16 @@ export class AgentCore {
     const gap = config.humanlike.schedule.proactiveGapMs
     if (!gap) return
     if (inQuietHours()) return
-    if (this.lastActiveAt && Date.now() - this.lastActiveAt < gap) return
-    if (this.lastReplyAt && Date.now() - this.lastReplyAt < gap) return
+    // 近期状态：精力/社交/心情高、不忙不烦才更想主动冒泡
+    const stateActive = config.humanlike.recentState.enabled && config.humanlike.recentState.effects.proactive
+    const mods = computeModifiers(this.recentState)
+    if (stateActive && Math.random() > mods.proactive) return
+    const effectiveGap = stateActive ? gap * (1.6 - mods.proactive) : gap
+    if (this.lastActiveAt && Date.now() - this.lastActiveAt < effectiveGap) return
+    if (this.lastReplyAt && Date.now() - this.lastReplyAt < effectiveGap) return
     const now = Date.now()
     for (const [key, d] of this.dialogs) {
-      if (now - (d.at(-1)?.time ?? 0) < gap) continue
+      if (now - (d.at(-1)?.time ?? 0) < effectiveGap) continue
       const t: SceneType = key.startsWith('p:') ? 'private' : 'group'
       const id = Number(key.slice(2))
       if (this.pending.has(key)) continue
@@ -352,22 +404,32 @@ export class AgentCore {
     const id = Number(key.slice(2))
     const p = paramFor(t)
     try {
+      const mods = computeModifiers(this.recentState)
       const ragContext = await searchRag(lastMsg)
       const systemPrompt = buildSystemPrompt(t)
       const ragMsg = buildRagContextMessage(ragContext)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
-      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...hist, ...(ragMsg ? [ragMsg] : []), userMsg]
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
-      await sleep(sampleReactMs())
+      await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+      const stateMsg = buildStateContextMessage(this.recentState)
+      const messages: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...hist,
+        ...(ragMsg ? [ragMsg] : []),
+        ...(stateMsg ? [stateMsg] : []),
+        userMsg,
+      ]
       const raw = await callLlm(messages)
       if (!raw) return
-      const reply = applyStyle(raw, lastMsg)
+      const reply = applyStyle(raw, lastMsg, this.styleBias(mods))
       const wait = Math.max(this.lastReplyAt + p.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
+      this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
+      this.persistState(true)
       this.noteReply()
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...(await this.dialogFor(key)), userMsg, assistantMsg].slice(-config.agent.maxHistory)
@@ -487,6 +549,7 @@ export class AgentCore {
 
   getSnapshot(): AgentSnapshot {
     const now = Date.now()
+    decayState(this.recentState, now)
     const scenes: Record<SceneKey, SceneView> = {}
     const allKeys = new Set<SceneKey>([
       ...this.dialogs.keys(),
@@ -528,6 +591,7 @@ export class AgentCore {
       privateBatchN: config.agent.privateBatchN,
       privateBatchT: config.agent.privateBatchT,
       respondMode: config.agent.respondMode,
+      recentState: stateView(this.recentState, now),
       scenes,
       groups: scenes,
     }
@@ -562,6 +626,8 @@ export class AgentCore {
       if (config.agent.memoryPersist) {
         for (const k of keys) clearDialogDb(k)
       }
+      this.recentState = resetState(this.stateKey)
+      this.persistState(true)
       console.log('[Core] 清空全部会话记忆')
     }
     this.emit()

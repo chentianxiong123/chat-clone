@@ -24,6 +24,11 @@ function openDb(): DatabaseSync {
         summary TEXT DEFAULT '',
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS recent_state (
+        state_key TEXT PRIMARY KEY,
+        state_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `)
     _db = db
     return db
@@ -197,4 +202,42 @@ export function shouldCompress(dialog: ChatMessage[], maxTokens: number, thresho
   if (maxTokens <= 0 || !dialog.length) return false
   const tokens = countMessagesTokens(dialog)
   return tokens / maxTokens > threshold
+}
+
+// ── 近期状态持久化（全局，单行 JSON；与对话上下文分离，避免污染历史）──
+export function loadRecentState(key = 'global'): { json: string; updatedAt: number } | null {
+  const db = openDb()
+  if (!db) return null
+  try {
+    const row = db.prepare(`SELECT state_json, updated_at FROM recent_state WHERE state_key = ?`).get(key) as
+      | { state_json: string; updated_at: number }
+      | undefined
+    return row ? { json: row.state_json, updatedAt: row.updated_at } : null
+  } catch {
+    return null
+  }
+}
+
+export function saveRecentState(key: string, json: string): void {
+  const db = openDb()
+  if (!db) return
+  try {
+    db.prepare(
+      `INSERT INTO recent_state(state_key, state_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(state_key) DO UPDATE SET
+         state_json = excluded.state_json,
+         updated_at = excluded.updated_at`,
+    ).run(key, json, Date.now())
+  } catch (e) {
+    console.warn('[Memory] 保存近期状态失败:', (e as Error).message)
+  }
+}
+
+export function clearRecentState(key = 'global'): void {
+  const db = openDb()
+  if (!db) return
+  try {
+    db.prepare(`DELETE FROM recent_state WHERE state_key = ?`).run(key)
+  } catch { /* ignore */ }
 }

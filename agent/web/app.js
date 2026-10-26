@@ -74,6 +74,7 @@ function renderState(snap) {
   $('ov-batch-t').textContent = (snap.batchT / 1000).toFixed(0)
   $('ov-cooldown').textContent = snap.cooldownLeftMs > 0 ? fmtSince(snap.cooldownLeftMs) : '就绪'
   $('ov-mode-note').textContent = 'respondMode: ' + snap.respondMode
+  renderRecentState(snap.recentState)
 
   const list = $('group-list')
   const groups = Object.values(snap.groups).sort((a, b) => b.lastReplyAt - a.lastReplyAt)
@@ -84,6 +85,52 @@ function renderState(snap) {
   list.innerHTML = groups.map((g) => renderGroup(g)).join('')
   bindGroupButtons()
   renderChatFlow()
+}
+
+// ── 近期状态卡片 ──
+function stateBar(label, value, color) {
+  const v = Math.max(0, Math.min(1, Number(value) || 0))
+  return `<div>
+    <div class="flex justify-between text-[10px] text-slate-500 mb-1"><span>${label}</span><span class="font-mono">${(v * 100).toFixed(0)}%</span></div>
+    <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden"><div class="h-full ${color} rounded-full" style="width:${v * 100}%"></div></div>
+  </div>`
+}
+
+function renderRecentState(s) {
+  const el = $('recent-state')
+  if (!el) return
+  if (!s) {
+    el.innerHTML = `<div class="text-sm font-semibold mb-2">近期状态</div><div class="text-xs text-slate-500">未启用</div>`
+    return
+  }
+  const m = s.modifiers || {}
+  const labels = s.labels || {}
+  const topic = s.topic ? `${esc(s.topic)}×${Math.round(s.topicHits || 0)}` : '--'
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold">近期状态 <span class="text-[10px] text-slate-500 font-normal">全局 · 实时</span></div>
+      <div class="text-[10px] text-slate-500">${esc(labels.energy || '')} · ${esc(labels.mood || '')} · ${esc(labels.patience || '')} · ${esc(labels.social || '')} · ${esc(labels.busy || '')}</div>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+      ${stateBar('精力', s.energy, 'bg-emerald-400')}
+      ${stateBar('心情', s.mood, 'bg-sky-400')}
+      ${stateBar('耐心', s.patience, 'bg-amber-400')}
+      ${stateBar('社交电量', s.social, 'bg-fuchsia-400')}
+      ${stateBar('忙碌', s.busy, 'bg-orange-400')}
+      ${stateBar('烦躁', s.irritation, 'bg-rose-400')}
+      ${stateBar('兴趣', s.interest, 'bg-indigo-400')}
+      ${stateBar('专注', s.focus, 'bg-cyan-400')}
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px] text-slate-500 mt-3">
+      <div>近期消息 <span class="font-mono text-slate-300">${(s.recentMsgs || 0).toFixed(1)}</span> · <span class="font-mono text-slate-300">${(s.msgRate || 0).toFixed(1)}/分</span></div>
+      <div>近期回复 <span class="font-mono text-slate-300">${(s.recentReplies || 0).toFixed(1)}</span> · <span class="font-mono text-slate-300">${(s.replyRate || 0).toFixed(1)}/分</span></div>
+      <div>静默 <span class="font-mono text-slate-300">${fmtSince(s.silenceMs)}</span> · 连发 <span class="font-mono text-slate-300">${s.otherStreak || 0}</span></div>
+      <div>话题 <span class="text-slate-300">${topic}</span></div>
+    </div>
+    <div class="text-[11px] text-slate-500 mt-1">
+      状态修正：回复×${(m.replyProb || 1).toFixed(2)} · 延迟×${(m.reactDelay || 1).toFixed(2)} · 长度×${(m.styleLength || 1).toFixed(2)} · 主动 ${Math.round((m.proactive || 0) * 100)}%
+    </div>
+  `
 }
 
 // ── 场景卡片 ──

@@ -15,7 +15,8 @@ function envNum(name: string, def: number): number {
 
 /** "0.5,0.7,..." → number[] */
 function parseNumList(raw?: string): number[] {
-  return (raw || '').split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n))
+  if (!raw) return []
+  return raw.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n))
 }
 
 /** "2000:28,3000:16,..." → [{upToMs,weight}]，按上限升序 */
@@ -238,6 +239,60 @@ export const config = {
       drowsy: parseDrowsy(process.env.HL_DROWSY || ''),
       // 某场景沉寂超过此间隔则主动冒泡（0=关闭）
       proactiveGapMs: Number(process.env.PROACTIVE_GAP_MS) || 0,
+    },
+    // ── F. 近期状态 —— 此刻累不累/烦不烦/想不想聊（全局，单群场景）──
+    // 数值 0~1；事件更新 + 指数衰减回基线；影响回复概率/延迟/风格/主动，并注入提示词
+    recentState: {
+      enabled: process.env.HL_STATE_MODEL !== 'false',
+      // 是否把紧凑状态行注入 LLM（放对话尾部，不破坏 system 前缀缓存）
+      injectPrompt: process.env.HL_STATE_INJECT !== 'false',
+      promptMaxChars: envNum('HL_STATE_PROMPT_MAX_CHARS', 260),
+      // 随机扰动（心情/精力每次事件轻微漂移，避免死板）
+      noise: envNum('HL_STATE_NOISE', 0.02),
+      // 近期消息/回复统计窗口与连发重置
+      windowMs: envNum('HL_STATE_WINDOW_MS', 300_000),
+      streakTimeoutMs: envNum('HL_STATE_STREAK_TIMEOUT_MS', 600_000),
+      // 24 个精力基线（0~1，空=用画像 hourRatio / 默认曲线）
+      energyHourly: parseNumList(process.env.HL_STATE_ENERGY_HOURLY),
+      // 忙碌时段 start-end@忙碌度（工作/上课）
+      busyHours: parseDrowsy(process.env.HL_STATE_BUSY_HOURS || '09:00-12:00@0.55,14:00-18:00@0.55'),
+      baseline: {
+        energy: clamp01(envNum('HL_STATE_BASE_ENERGY', 0.6)),
+        mood: clamp01(envNum('HL_STATE_BASE_MOOD', 0.55)),
+        patience: clamp01(envNum('HL_STATE_BASE_PATIENCE', 0.7)),
+        social: clamp01(envNum('HL_STATE_BASE_SOCIAL', 0.8)),
+        busy: clamp01(envNum('HL_STATE_BASE_BUSY', 0.15)),
+      },
+      // 衰减半衰期（ms）：越小回基线越快
+      decay: {
+        energyMs: envNum('HL_STATE_DECAY_ENERGY_MS', 45 * 60_000),
+        moodMs: envNum('HL_STATE_DECAY_MOOD_MS', 90 * 60_000),
+        patienceMs: envNum('HL_STATE_DECAY_PATIENCE_MS', 40 * 60_000),
+        socialMs: envNum('HL_STATE_DECAY_SOCIAL_MS', 60 * 60_000),
+        busyMs: envNum('HL_STATE_DECAY_BUSY_MS', 20 * 60_000),
+        irritationMs: envNum('HL_STATE_DECAY_IRRITATION_MS', 8 * 60_000),
+        interestMs: envNum('HL_STATE_DECAY_INTEREST_MS', 20 * 60_000),
+        focusMs: envNum('HL_STATE_DECAY_FOCUS_MS', 30 * 60_000),
+        topicMs: envNum('HL_STATE_DECAY_TOPIC_MS', 20 * 60_000),
+      },
+      // 效果开关
+      effects: {
+        replyProb: process.env.HL_STATE_EFFECT_REPLY !== 'false',
+        react: process.env.HL_STATE_EFFECT_REACT !== 'false',
+        style: process.env.HL_STATE_EFFECT_STYLE !== 'false',
+        proactive: process.env.HL_STATE_EFFECT_PROACTIVE !== 'false',
+      },
+      // 效果强度（1=默认，0=关闭该维度影响）
+      weights: {
+        reply: envNum('HL_STATE_W_REPLY', 1),
+        react: envNum('HL_STATE_W_REACT', 1),
+        length: envNum('HL_STATE_W_LENGTH', 1),
+        emoji: envNum('HL_STATE_W_EMOJI', 1),
+        filler: envNum('HL_STATE_W_FILLER', 1),
+        typo: envNum('HL_STATE_W_TYPO', 1),
+        echo: envNum('HL_STATE_W_ECHO', 1),
+        proactive: envNum('HL_STATE_W_PROACTIVE', 1),
+      },
     },
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
