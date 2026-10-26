@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadMinedProfile } from './stats.js'
 
 function clamp01(x: number): number { return Math.min(1, Math.max(0, x)) }
 
@@ -109,7 +110,7 @@ export const config = {
   },
   // ── 拟人画像 HumanProfile（A~E 全维度，全部可配置）────────────────────────
   // 目标：每个参数都能从「原始聊天数据」统计得出（见 profile.ts buildProfileFromStats）
-  // source 目前固定 env；后续实现数据导入后切换为 db:<统计表>
+  // source: env | auto(先 stats.db 后 profile.json) | db | json
   humanlike: {
     source: process.env.HL_PROFILE_SOURCE || 'env',
     // ── A. 触发应答 —— 回不回 ──
@@ -210,6 +211,8 @@ export type Config = typeof config
 const PROFILE_PATH = join(dirname(fileURLToPath(new URL('.', import.meta.url))), 'data', 'profile.json')
 
 export type MinedProfileMeta = {
+  /** 实际来源：db=stats.db / json=data/profile.json / 空=未加载 */
+  source?: 'db' | 'json'
   generatedAt?: string
   self?: string
   files?: string[]
@@ -231,22 +234,46 @@ function deepMerge(target: Record<string, unknown>, src: unknown): void {
   }
 }
 
-if (config.humanlike.source === 'json' || config.humanlike.source === 'auto') {
+type RawProfile = MinedProfileMeta & { override?: unknown }
+
+function parseProfile(text: string): RawProfile | null {
   try {
-    if (existsSync(PROFILE_PATH)) {
-      const raw = JSON.parse(readFileSync(PROFILE_PATH, 'utf8')) as MinedProfileMeta & { override?: unknown }
-      deepMerge(config.humanlike as unknown as Record<string, unknown>, raw.override ?? raw)
-      minedProfileMeta = {
-        generatedAt: raw.generatedAt,
-        self: raw.self,
-        files: raw.files,
-        sample: raw.sample,
-        stats: raw.stats,
-      }
-    } else if (config.humanlike.source === 'json') {
-      console.warn(`[config] HL_PROFILE_SOURCE=json 但未找到 ${PROFILE_PATH}，回退 env`)
-    }
+    return JSON.parse(text) as RawProfile
   } catch (e) {
-    console.warn(`[config] 加载画像失败，回退 env: ${(e as Error).message}`)
+    console.warn(`[config] 画像 JSON 解析失败: ${(e as Error).message}`)
+    return null
+  }
+}
+
+const profileSource = config.humanlike.source
+let rawProfile: RawProfile | null = null
+let loadedFrom: 'db' | 'json' | null = null
+
+// auto: 先库后文件；db: 只读 stats.db；json: 只读文件；env: 全忽略
+if (profileSource === 'db' || profileSource === 'auto') {
+  const row = loadMinedProfile()
+  if (row) {
+    rawProfile = parseProfile(row.json)
+    if (rawProfile) loadedFrom = 'db'
+  }
+}
+if (!rawProfile && (profileSource === 'json' || profileSource === 'auto')) {
+  if (existsSync(PROFILE_PATH)) {
+    rawProfile = parseProfile(readFileSync(PROFILE_PATH, 'utf8'))
+    if (rawProfile) loadedFrom = 'json'
+  } else if (profileSource === 'json') {
+    console.warn(`[config] HL_PROFILE_SOURCE=json 但未找到 ${PROFILE_PATH}，回退 env`)
+  }
+}
+
+if (rawProfile) {
+  deepMerge(config.humanlike as unknown as Record<string, unknown>, rawProfile.override ?? rawProfile)
+  minedProfileMeta = {
+    source: loadedFrom ?? undefined,
+    generatedAt: rawProfile.generatedAt,
+    self: rawProfile.self,
+    files: rawProfile.files,
+    sample: rawProfile.sample,
+    stats: rawProfile.stats,
   }
 }

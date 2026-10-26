@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildProfileFromStats, type MinedStats } from './profile.js'
+import { saveMinedProfile } from './stats.js'
 
 /**
  * 从原始聊天记录（jsonl）挖掘拟人画像，输出 data/profile.json。
@@ -261,10 +262,12 @@ function main() {
     stats,
     override,
   }
+  const payload = JSON.stringify(out, null, 2) + '\n'
   mkdirSync(dirname(OUT_FILE), { recursive: true })
-  writeFileSync(OUT_FILE, JSON.stringify(out, null, 2) + '\n', 'utf8')
+  writeFileSync(OUT_FILE, payload, 'utf8')
+  saveMinedProfile(payload)
 
-  console.log(`[mine] 已写出 ${OUT_FILE}`)
+  console.log(`[mine] 已写出 ${OUT_FILE}（并写入 stats.db mined_profile）`)
   console.log('[mine] 关键统计:', JSON.stringify({ ...stats, hourRatio: undefined, emojis: stats.emojis.slice(0, 5), fillers: stats.fillers.slice(0, 8) }, null, 2))
   console.log('[mine] 画像覆盖:', JSON.stringify(override, null, 2))
 }

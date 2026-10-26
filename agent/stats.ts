@@ -63,6 +63,11 @@ function openDb(): DatabaseSync {
         reply INTEGER NOT NULL DEFAULT 0,
         last_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS mined_profile (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `)
     // 兼容旧库：补齐新列（仅当缺失时）
     const cols = (db.prepare(`PRAGMA table_info(usage_log)`).all() as Array<{ name: string }>).map(c => c.name)
@@ -78,6 +83,34 @@ function openDb(): DatabaseSync {
 }
 
 const startedAt = Date.now()
+
+/** 保存数据挖掘画像（单行 JSON，覆盖式） */
+export function saveMinedProfile(json: string): void {
+  const db = openDb()
+  if (!db) return
+  try {
+    db.prepare(
+      `INSERT INTO mined_profile(id, json, updated_at) VALUES (1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at`,
+    ).run(json, Date.now())
+  } catch (e) {
+    console.warn('[Stats] 保存 mined_profile 失败:', (e as Error).message)
+  }
+}
+
+/** 读取数据挖掘画像（无则 null） */
+export function loadMinedProfile(): { json: string; updatedAt: number } | null {
+  const db = openDb()
+  if (!db) return null
+  try {
+    const row = db.prepare(`SELECT json, updated_at FROM mined_profile WHERE id = 1`).get() as
+      | { json: string; updated_at: number }
+      | undefined
+    return row ? { json: row.json, updatedAt: row.updated_at } : null
+  } catch {
+    return null
+  }
+}
 
 export function recordUsage(rec: UsageRecord): void {
   const db = openDb()

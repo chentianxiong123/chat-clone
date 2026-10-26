@@ -517,8 +517,8 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">画像来源</div>
-        <div class="font-mono">${esc(hl.source || 'env')}</div>
-        <div class="text-slate-600">${profileMeta?.generatedAt ? '挖掘 ' + esc(profileMeta.generatedAt.slice(0, 16).replace('T', ' ')) + ' · 本人' + (profileMeta.sample?.selfText ?? 0) + '条' : '未加载 profile.json'}</div>
+        <div class="font-mono">${esc(hl.source || 'env')}${profileMeta?.source ? ' → ' + esc(profileMeta.source) : ''}</div>
+        <div class="text-slate-600">${profileMeta?.generatedAt ? '挖掘 ' + esc(profileMeta.generatedAt.slice(0, 16).replace('T', ' ')) + ' · 本人' + (profileMeta.sample?.selfText ?? 0) + '条' : '未加载画像，全部用 env'}</div>
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">记忆 / 触发</div>
