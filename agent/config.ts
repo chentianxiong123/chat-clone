@@ -158,12 +158,12 @@ export const config = {
         enabled: process.env.HL_STATE_ENABLED !== 'false',
         applyToPrivate: process.env.HL_STATE_PRIVATE === 'true',
         activeWithinMs: envNum('HL_STATE_ACTIVE_WITHIN_MS', 60_000),
-        active: clamp01(envNum('HL_STATE_ACTIVE_PROB', 0.99)),
+        active: clamp01(envNum('HL_STATE_ACTIVE_PROB', 1.0)),
         semiWithinMs: envNum('HL_STATE_SEMI_WITHIN_MS', 300_000),
-        semi: clamp01(envNum('HL_STATE_SEMI_PROB', 0.74)),
+        semi: clamp01(envNum('HL_STATE_SEMI_PROB', 0.9)),
         coldWithinMs: envNum('HL_STATE_COLD_WITHIN_MS', 1_800_000),
-        cold: clamp01(envNum('HL_STATE_COLD_PROB', 0.47)),
-        veryCold: clamp01(envNum('HL_STATE_VERY_COLD_PROB', 0.39)),
+        cold: clamp01(envNum('HL_STATE_COLD_PROB', 0.85)),
+        veryCold: clamp01(envNum('HL_STATE_VERY_COLD_PROB', 0.8)),
       },
       // 分时段乘数（24 个，空=不启用；主要压低早晨 07-09）
       hourly: parseNumList(process.env.HL_REPLY_HOURLY),
@@ -237,6 +237,13 @@ export const config = {
         .filter((x): x is { from: string; to: string } => !!x),
       // 偶尔"回敬"对方最后一个词（复读/接话）
       echoProb: clamp01(Number(process.env.HL_STYLE_ECHO_PROB) || 0.08),
+      // 粗口收敛：检测到脏词时按 softenProb 概率替换为柔和词（0=关闭，1=全量收敛）
+      curseSoftenProb: clamp01(Number(process.env.HL_STYLE_CURSE_SOFTEN_PROB) || 0.6),
+      // 粗口替换表 "原词=柔和词"，可多个逗号分隔；柔和词留空=直接删除该脏词
+      curseMap: String(process.env.HL_STYLE_CURSE_MAP || '草=我去,妈的=哎呀,你妈=你大爷,傻逼=憨批,废物=菜鸡,这逼=这货,操=靠,他妈的=真气人,你妈死了=气死我了').split(',')
+        .map(p => p.trim()).filter(Boolean)
+        .map(p => { const [from, to] = p.split('='); return from ? { from: from.trim(), to: (to || '').trim() } : null })
+        .filter((x): x is { from: string; to: string } => !!x),
     },
     // ── E. 日程节律 —— 什么时候活 ──
     schedule: {

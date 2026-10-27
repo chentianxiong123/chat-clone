@@ -329,6 +329,20 @@ export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): strin
     }
   }
 
+  // 6) 粗口收敛：逐词命中按概率替换为柔和词（保留人设语感，但降频不洗没）
+  const softenProb = st.curseSoftenProb
+  if (softenProb > 0 && st.curseMap.length) {
+    for (const { from, to } of st.curseMap) {
+      if (!out.includes(from)) continue
+      const parts = out.split(from)
+      let res = parts[0]
+      for (let i = 1; i < parts.length; i++) {
+        res += (Math.random() < softenProb ? to : from) + parts[i]
+      }
+      out = res
+    }
+  }
+
   return out
 }
 
