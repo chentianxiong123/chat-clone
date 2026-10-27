@@ -91,6 +91,17 @@ export const config = {
     vecProb: clamp01(envNum('RAG_VEC_PROB', 0.3)),
     // 本地检索全空时是否强制升级向量兜底（保证有人格参考可给；false 则直接返回空）
     vecFallbackOnEmpty: process.env.RAG_VEC_FALLBACK === 'true',
+    // ── RAG 工具化（function call）──
+    // 总开关：开启后不再每轮把 RAG 当 user 参考资料注入，改为工具按需调用
+    toolsEnabled: process.env.RAG_TOOLS_ENABLED !== 'false',
+    // 无"过去指代"时的主动回忆概率（0=从不主动，1=每轮都预取）
+    recallProb: clamp01(envNum('RAG_RECALL_PROB', 0.15)),
+    // 工具循环上限（防止小模型反复调用死循环）
+    toolMaxIter: Math.max(1, Math.round(envNum('RAG_TOOL_MAX_ITER', 2))),
+    // 每次检索最多注入的记忆条数
+    toolMaxItems: Math.max(1, Math.round(envNum('RAG_TOOL_MAX_ITEMS', 1))),
+    // remember 单条事实长度上限
+    factMaxChars: Math.max(10, Math.round(envNum('MEMORY_FACT_MAX_CHARS', 60))),
   },
   // ── Persona / 人格 ────────────────────────────────────────────────────────
   persona: {

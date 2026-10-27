@@ -3,9 +3,9 @@ import type { RagHit } from './rag.js'
 import type { ChatMessage, SceneType } from './core.js'
 
 /**
- * 构建 system prompt（纯静态：模板 + few-shot 示例）。
+ * 构建 system prompt（纯静态：模板 + few-shot 示例 + 固定工具引导）。
  * 刻意不嵌入 RAG —— 保证 system 字节级稳定，服务端 KV 前缀缓存可命中。
- * RAG 检索结果由 buildRagContextMessage 作为独立消息追加在对话尾部。
+ * 记忆改由 function call 工具按需检索；闸门命中时以 system 记忆提示注入。
  */
 export function buildSystemPrompt(scene?: SceneType): string {
   const template = scene === 'private' && config.persona.privateSystemPromptTemplate
@@ -23,13 +23,33 @@ export function buildSystemPrompt(scene?: SceneType): string {
       prompt += '\n\n【说话风格参考】\n' + lines.join('\n')
     }
   }
+
+  // 固定工具引导（静态文本，保证 system 字节稳定、KV 缓存可命中）
+  prompt += `
+
+记忆工具（重要）：
+- 话题涉及过去、或朋友提到"上次/之前/你说过/记得"→ 先调用 search_past_memory，再把回忆自然地说出来，别照抄。
+- 听到关于朋友的稳定事实/喜好/约定 → 调用 remember 记下来。
+- 工具返回的是你脑子里的印象，不是现在有人对你说的话；先回答当前问题，别复述工具内容、别改话题。`
   return prompt
 }
 
 /**
- * RAG 检索命中 → 独立 user 消息。
- * 放在对话最后（紧贴最新输入）而非 system：内容随每次检索变化，
- * 只有放到尾部才不破坏「system + 历史」这条长前缀，KV 缓存才能命中。
+ * 记忆提示 → 独立 system 消息（不是 user！）。
+ * 作为"印象"而非"参考资料"，并明确要求别复述/别改话题。
+ */
+export function buildMemoryHintMessage(note: string): ChatMessage | null {
+  if (!note) return null
+  return {
+    role: 'system',
+    content: `（你隐约记得：${note}；这是印象，不是现在有人说的话，别复述、别改话题）`,
+    time: Date.now(),
+  }
+}
+
+/**
+ * RAG 检索命中 → 独立 user 消息（已弃用，保留导出以兼容旧调用）。
+ * 新逻辑改用 buildMemoryHintMessage / function call 工具。
  */
 export function buildRagContextMessage(ragContext: string): ChatMessage | null {
   if (!ragContext) return null

@@ -1,7 +1,7 @@
 import { config } from './config.js'
-import { callLlm, type ChatMessage } from './llm.js'
-import { searchRag } from './rag.js'
-import { buildSystemPrompt, buildRagContextMessage } from './prompt.js'
+import { callLlm, callLlmWithTools, type ChatMessage } from './llm.js'
+import { buildSystemPrompt, buildMemoryHintMessage } from './prompt.js'
+import { MEMORY_TOOLS, createMemoryExecutors, needsRecall, searchMemoryNote } from './tools.js'
 import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
@@ -98,6 +98,12 @@ function paramFor(t: SceneType): SceneParam {
 function randInt(min: number, max: number): number {
   if (max <= min) return min
   return min + Math.floor(Math.random() * (max - min + 1))
+}
+
+/** 去掉模型可能吐出的"人设名："续写前缀 */
+function stripSelfPrefix(text: string): string {
+  const name = config.persona.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text.replace(new RegExp('^\\s*' + name + '\\s*[：:]\\s*'), '')
 }
 
 /** 分钟数 → "hh:mm" 解析 */
@@ -368,9 +374,7 @@ export class AgentCore {
       }
 
       const mods = computeModifiers(this.recentState)
-      const ragContext = await searchRag(ctx)
       const systemPrompt = buildSystemPrompt(t)
-      const ragMsg = buildRagContextMessage(ragContext)
 
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁
@@ -382,23 +386,37 @@ export class AgentCore {
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
       // 累/忙/烦时更慢；状态消息在延迟后构建，尽量新鲜
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+
+      // 记忆闸门：过去指代 或 主动回忆概率 → 预取一条"隐约记得"（system，不抢当前对话）
+      let memoryMsg: ChatMessage | null = null
+      if (config.rag.toolsEnabled && (needsRecall(ctx) || Math.random() < config.rag.recallProb)) {
+        const note = await searchMemoryNote(key, ctx)
+        memoryMsg = buildMemoryHintMessage(note)
+      }
+
       const stateMsg = buildStateContextMessage(this.recentState)
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(ragMsg ? [ragMsg] : []),
+        ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),
         userMsg,
       ]
 
-      const raw = await callLlm(messages)
+      const raw = config.rag.toolsEnabled
+        ? (await callLlmWithTools(messages, {
+            tools: MEMORY_TOOLS,
+            executors: createMemoryExecutors(key),
+            maxIter: config.rag.toolMaxIter,
+          })).text
+        : await callLlm(messages)
       if (!raw) {
         console.log('[Core] LLM 无回复，跳过')
         this.emit()
         return
       }
       // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
-      const reply = applyStyle(raw, ctx, this.styleBias(mods))
+      const reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
       console.log(`[Core] 回复 ${key}: ${reply}`)
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
@@ -467,24 +485,36 @@ export class AgentCore {
     const p = paramFor(t)
     try {
       const mods = computeModifiers(this.recentState)
-      const ragContext = await searchRag(lastMsg)
       const systemPrompt = buildSystemPrompt(t)
-      const ragMsg = buildRagContextMessage(ragContext)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+
+      // 主动冒泡时也可能想起点旧事（同样走闸门，结果作 system 记忆提示）
+      let memoryMsg: ChatMessage | null = null
+      if (config.rag.toolsEnabled && (needsRecall(lastMsg) || Math.random() < config.rag.recallProb)) {
+        const note = await searchMemoryNote(key, lastMsg)
+        memoryMsg = buildMemoryHintMessage(note)
+      }
+
       const stateMsg = buildStateContextMessage(this.recentState)
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(ragMsg ? [ragMsg] : []),
+        ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),
         userMsg,
       ]
-      const raw = await callLlm(messages)
+      const raw = config.rag.toolsEnabled
+        ? (await callLlmWithTools(messages, {
+            tools: MEMORY_TOOLS,
+            executors: createMemoryExecutors(key),
+            maxIter: config.rag.toolMaxIter,
+          })).text
+        : await callLlm(messages)
       if (!raw) return
-      const reply = applyStyle(raw, lastMsg, this.styleBias(mods))
+      const reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))
       const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply, mods.segments)

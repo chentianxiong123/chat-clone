@@ -29,6 +29,13 @@ function openDb(): DatabaseSync {
         state_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS facts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scene_key TEXT NOT NULL,
+        fact TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        UNIQUE(scene_key, fact)
+      );
     `)
     _db = db
     return db
@@ -240,4 +247,63 @@ export function clearRecentState(key = 'global'): void {
   try {
     db.prepare(`DELETE FROM recent_state WHERE state_key = ?`).run(key)
   } catch { /* ignore */ }
+}
+
+// ── 长期事实记忆（remember 工具写入；按场景隔离）──
+/** 记一条关于朋友的稳定事实（去重；返回是否新增） */
+export function addFact(sceneKey: string, fact: string): boolean {
+  const db = openDb()
+  if (!db) return false
+  const text = fact.trim()
+  if (!text) return false
+  try {
+    const r = db.prepare(
+      `INSERT OR IGNORE INTO facts(scene_key, fact, ts) VALUES (?, ?, ?)`,
+    ).run(sceneKey, text, Date.now())
+    return Number(r.changes) > 0
+  } catch (e) {
+    console.warn('[Memory] 写入事实失败:', (e as Error).message)
+    return false
+  }
+}
+
+/** 从查询里取用于 LIKE 的检索词：中文二元组 + 英文/数字词（滤掉常见虚词二元组） */
+const FACT_STOP_BIGRAMS = new Set([
+  '什么', '怎么', '为什', '这个', '那个', '一个', '没有', '还是', '不是', '可以',
+  '我们', '你们', '他们', '现在', '真的', '是不', '有没', '东西', '事情', '问题',
+  '时候', '今天', '明天', '昨天', '晚上', '白天', '上次', '之前', '以前',
+])
+function queryTerms(query: string, limit = 8): string[] {
+  const q = query.replace(/\s+/g, '')
+  const out: string[] = []
+  for (let i = 0; i < q.length - 1; i++) {
+    const g = q.slice(i, i + 2)
+    if (/^[\u4e00-\u9fff]{2}$/.test(g) && !FACT_STOP_BIGRAMS.has(g)) out.push(g)
+  }
+  for (const w of (query.match(/[a-zA-Z0-9_]{2,}/g) || [])) out.push(w.toLowerCase())
+  return Array.from(new Set(out)).slice(0, limit)
+}
+
+/** 按关键词查事实（本场景，返回最近若干条） */
+export function searchFacts(sceneKey: string, query: string, limit = 3): string[] {
+  const db = openDb()
+  if (!db) return []
+  const kws = queryTerms(query)
+  try {
+    if (!kws.length) {
+      const rows = db.prepare(
+        `SELECT fact FROM facts WHERE scene_key = ? ORDER BY ts DESC LIMIT ?`,
+      ).all(sceneKey, limit) as Array<{ fact: string }>
+      return rows.map(r => r.fact)
+    }
+    const likes = kws.map(() => 'fact LIKE ?').join(' OR ')
+    const args: Array<string | number> = [...kws.map(k => `%${k}%`), sceneKey, limit]
+    const rows = db.prepare(
+      `SELECT fact FROM facts WHERE (${likes}) AND scene_key = ? ORDER BY ts DESC LIMIT ?`,
+    ).all(...args) as Array<{ fact: string }>
+    return rows.map(r => r.fact)
+  } catch (e) {
+    console.warn('[Memory] 查询事实失败:', (e as Error).message)
+    return []
+  }
 }
