@@ -183,6 +183,8 @@ export const config = {
     cooldown: {
       groupMs: Number(process.env.REPLY_COOLDOWN) || 25_000,
       privateMs: Number(process.env.PRIVATE_REPLY_COOLDOWN) || 10_000,
+      // 冷却/防抖/首条迟疑的随机抖动比（±ratio），破坏固定节奏防封控
+      jitter: clamp01(envNum('HL_JITTER_RATIO', 0.35)),
     },
     // 刷屏抑制：窗口内连续回复超 maxReplies 次 → 额外冷却（模拟真人被盯烦了会冷场）
     burst: {

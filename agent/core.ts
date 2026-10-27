@@ -64,6 +64,8 @@ type Listener = (snap: AgentSnapshot) => void
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 const chance = (p: number): boolean => Math.random() < p
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
+/** 给一个基准时长加上 ±ratio 的随机抖动，破坏固定节奏 */
+const jitter = (base: number, ratio: number): number => Math.round(base * (1 + (Math.random() * 2 - 1) * ratio))
 
 export const sceneKey = (t: SceneType, id: number): SceneKey => `${t === 'private' ? 'p' : 'g'}:${id}`
 
@@ -161,6 +163,8 @@ export class AgentCore {
   private stateKey = 'global'
   private lastStateSaveAt = 0
   private listeners = new Set<Listener>()
+  /** 每个场景的回复串行锁：保证同时只有一条回复在"想+发"，分段间隔不被并发打乱 */
+  private flushChain = new Map<SceneKey, Promise<void>>()
   connected = false
   connError?: string
 
@@ -236,17 +240,17 @@ export class AgentCore {
 
     // 合适 @/唤醒词命中 → 立即触发（被抓到才应）
     if (t === 'group' && woke && g.lines.length >= 1) {
-      void this.flush(key)
+      void this.enqueueFlush(key)
       return
     }
     if (g.lines.length >= batchN) {
-      void this.flush(key)
+      void this.enqueueFlush(key)
       return
     }
-    // 条件B：防抖重置，T 秒无新消息 → 触发
+    // 条件B：防抖重置，T 秒无新消息 → 触发（T 带随机抖动，避免固定超时特征）
     const old = this.timers.get(key)
     if (old) clearTimeout(old.handle)
-    this.timers.set(key, { handle: setTimeout(() => this.flush(key), p.batchT), deadlineAt: Date.now() + p.batchT })
+    this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), jitter(p.batchT, config.humanlike.cooldown.jitter)), deadlineAt: Date.now() + p.batchT })
     this.emit()
   }
 
@@ -295,6 +299,23 @@ export class AgentCore {
   }
 
   // ── 触发一轮回复 ──────────────────────────────────────────────────────
+
+  /** 每个场景串行排队：前一轮没跑完（反应/LLM/分段发送）就不并发，保住随机节奏 */
+  private enqueueFlush(key: SceneKey): void {
+    const run = (this.flushChain.get(key) ?? Promise.resolve())
+      .then(() => this.flush(key))
+      .catch(e => console.error('[Core] flush 错误:', e))
+      .finally(() => this.flushChain.delete(key))
+    this.flushChain.set(key, run)
+  }
+
+  private enqueueFlushProactive(key: SceneKey, ctx: string, lastMsg: string): void {
+    const run = (this.flushChain.get(key) ?? Promise.resolve())
+      .then(() => this.flushProactive(key, ctx, lastMsg))
+      .catch(e => console.error('[Core] 主动说话错误:', e))
+      .finally(() => this.flushChain.delete(key))
+    this.flushChain.set(key, run)
+  }
 
   async flush(key: SceneKey): Promise<void> {
     const old = this.timers.get(key)
@@ -355,8 +376,9 @@ export class AgentCore {
       this.dialogs.set(key, updated)
       this.persist(key)
 
-      // 发消息一定要慢：距上一条回复至少 cooldown；刷屏太密再叠加额外冷却
-      const wait = Math.max(this.lastReplyAt + p.cooldown - Date.now(), this.burstWaitMs())
+      // 发消息一定要慢：距上一条回复至少 cooldown（带随机抖动）；刷屏太密再叠加额外冷却
+      const baseCd = jitter(p.cooldown, config.humanlike.cooldown.jitter)
+      const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
@@ -393,7 +415,7 @@ export class AgentCore {
       if (!sceneAllowed(t, id)) continue
       const lastMsg = d.at(-1)?.content || ''
       const ctx = `（${t === 'group' ? '在群里' : '和' + config.persona.friendName + '单独聊'}）好久没动静了，${t === 'group' ? '找个话题冒个泡' : '主动发个消息'}`
-      void this.flushProactive(key, ctx, lastMsg)
+      void this.enqueueFlushProactive(key, ctx, lastMsg)
       this.lastActiveAt = now
       return
     }
@@ -423,7 +445,7 @@ export class AgentCore {
       const raw = await callLlm(messages)
       if (!raw) return
       const reply = applyStyle(raw, lastMsg, this.styleBias(mods))
-      const wait = Math.max(this.lastReplyAt + p.cooldown - Date.now(), this.burstWaitMs())
+      const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
       this.lastReplyAt = Date.now()
@@ -516,7 +538,7 @@ export class AgentCore {
       const gap = typingMs + ty.segGap.minMs +
         Math.random() * (ty.segGap.maxMs - ty.segGap.minMs)
       // 第一条也要短暂迟疑（想好开始打），之后按打字节奏
-      if (i === 1) await sleep(ty.firstDelayMs)
+      if (i === 1) await sleep(jitter(ty.firstDelayMs, config.humanlike.cooldown.jitter))
       else if (gap > 0) await sleep(Math.round(gap))
       if (this.onReply) {
         if (isBlank) {
