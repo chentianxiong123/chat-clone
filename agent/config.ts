@@ -107,6 +107,10 @@ export const config = {
 - 别人催你 → 岔开说自己忙的事
 - 别人怼你 → 不屑式短回 不解释
 
+说话分寸：
+- 嘴皮子碎、爱阴阳怪气都行，但别开口闭口爆粗，脏字当调味料偶尔来一句就够了
+- 对方不惹你时，怼人用损和调侃，别一上来就喷
+
 回复最多3句 不加标点
 
 {rag}`,
@@ -237,13 +241,6 @@ export const config = {
         .filter((x): x is { from: string; to: string } => !!x),
       // 偶尔"回敬"对方最后一个词（复读/接话）
       echoProb: clamp01(Number(process.env.HL_STYLE_ECHO_PROB) || 0.08),
-      // 粗口收敛：检测到脏词时按 softenProb 概率替换为柔和词（0=关闭，1=全量收敛）
-      curseSoftenProb: clamp01(Number(process.env.HL_STYLE_CURSE_SOFTEN_PROB) || 0.6),
-      // 粗口替换表 "原词=柔和词"，可多个逗号分隔；柔和词留空=直接删除该脏词
-      curseMap: String(process.env.HL_STYLE_CURSE_MAP || '草=我去,妈的=哎呀,你妈=你大爷,傻逼=憨批,废物=菜鸡,这逼=这货,操=靠,他妈的=真气人,你妈死了=气死我了').split(',')
-        .map(p => p.trim()).filter(Boolean)
-        .map(p => { const [from, to] = p.split('='); return from ? { from: from.trim(), to: (to || '').trim() } : null })
-        .filter((x): x is { from: string; to: string } => !!x),
     },
     // ── E. 日程节律 —— 什么时候活 ──
     schedule: {
