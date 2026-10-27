@@ -12,7 +12,7 @@ import {
   buildStateContextMessage, stateView, type RecentState, type RecentStateView, type StateModifiers,
 } from './state.js'
 
-export const BATCH_N = config.batch.n
+export const BATCH_N = `${config.batch.nMin}~${config.batch.nMax}`
 export const BATCH_T = config.batch.t
 
 // ── 场景类型 ──
@@ -87,11 +87,17 @@ function paramFor(t: SceneType): SceneParam {
     }
   }
   return {
-    batchN: config.batch.n,
+    batchN: randInt(config.batch.nMin, config.batch.nMax),
     batchT: config.batch.t,
     cooldown: config.humanlike.cooldown.groupMs,
     replyProb: config.humanlike.replyProb.group,
   }
+}
+
+/** 返回 [min,max] 闭区间内的随机整数 */
+function randInt(min: number, max: number): number {
+  if (max <= min) return min
+  return min + Math.floor(Math.random() * (max - min + 1))
 }
 
 /** 分钟数 → "hh:mm" 解析 */
@@ -149,7 +155,7 @@ function needWake(t: SceneType, msg: InjectedMessage): boolean {
 }
 
 export class AgentCore {
-  private pending = new Map<SceneKey, { lines: string[]; woke?: boolean }>()
+  private pending = new Map<SceneKey, { lines: string[]; woke?: boolean; atBot?: boolean; lastNick?: string; triggerNick?: string }>()
   private dialogs = new Map<SceneKey, ChatMessage[]>()
   private timers = new Map<SceneKey, { handle: ReturnType<typeof setTimeout>; deadlineAt: number }>()
   private lastReplyAt = 0
@@ -165,6 +171,8 @@ export class AgentCore {
   private listeners = new Set<Listener>()
   /** 每个场景的回复串行锁：保证同时只有一条回复在"想+发"，分段间隔不被并发打乱 */
   private flushChain = new Map<SceneKey, Promise<void>>()
+  /** 回复轮次锁：某场景正在"生成+逐条发送"期间锁住，不再触发新回复；整轮发完才解锁重判 */
+  private replying = new Set<SceneKey>()
   connected = false
   connError?: string
 
@@ -194,6 +202,8 @@ export class AgentCore {
     let g = this.pending.get(key)
     if (!g) { g = { lines: [] }; this.pending.set(key, g) }
     g.lines.push(line)
+    g.lastNick = who
+    if (msg.atBot) g.triggerNick = who
     recordGroupMsg(id)
     this.lastActiveAt = Date.now()
 
@@ -238,6 +248,15 @@ export class AgentCore {
     const wokeN = t === 'group' && !woke ? `待唤醒` : (woke ? '' : '')
     console.log(`[Core] 攒批 ${key} (${g.lines.length}/${batchN}${wokeN}): ${text.slice(0, 24)}`)
 
+    const replying = this.replying.has(key)
+    // 回复轮次中：不立即触发新回复，只重置防抖 timer（新消息并入下一轮；回复完成后 timer 到期再判）
+    if (replying) {
+      const old = this.timers.get(key)
+      if (old) clearTimeout(old.handle)
+      this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), jitter(p.batchT, config.humanlike.cooldown.jitter)), deadlineAt: Date.now() + p.batchT })
+      this.emit()
+      return
+    }
     // 合适 @/唤醒词命中 → 立即触发（被抓到才应）
     if (t === 'group' && woke && g.lines.length >= 1) {
       void this.enqueueFlush(key)
@@ -320,17 +339,24 @@ export class AgentCore {
   async flush(key: SceneKey): Promise<void> {
     const old = this.timers.get(key)
     if (old) { clearTimeout(old.handle); this.timers.delete(key) }
+    // 轮次锁：一整轮（生成 + 逐条发送）完成前，外部新消息不触发新回复
+    if (this.replying.has(key)) return
+    this.replying.add(key)
     const g = this.pending.get(key)
-    if (!g || g.lines.length === 0) return
+    if (!g || g.lines.length === 0) {
+      this.replying.delete(key)
+      return
+    }
     this.pending.delete(key)
     this.emit()
 
+    const triggerNick = g.triggerNick || g.lastNick
     const ctx = g.lines.join('\n')
     const t: SceneType = key.startsWith('p:') ? 'private' : 'group'
     const id = Number(key.slice(2))
     const p = paramFor(t)
 
-    console.log(`[Core] 触发 ${key}: 共 ${g.lines.length} 条`)
+    console.log(`[Core] 触发 ${key}: 共 ${g.lines.length} 条（触发者=${triggerNick || '无'}）`)
 
     try {
       // 回复概率：对话状态 + 分时段 + 连发长度（模拟真人；被点名必回）
@@ -347,7 +373,11 @@ export class AgentCore {
       const ragMsg = buildRagContextMessage(ragContext)
 
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
-      const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
+      // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁
+      const scopeLine = t === 'group' && triggerNick
+        ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
+        : '\n'
+      const userMsg: ChatMessage = { role: 'user', content: `${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
 
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
       // 累/忙/烦时更慢；状态消息在延迟后构建，尽量新鲜
@@ -391,6 +421,16 @@ export class AgentCore {
     } catch (err) {
       console.error('[Core] flush 错误:', err)
       this.emit()
+    } finally {
+      // 解锁轮次锁；若期间又攒了新消息，安排下一轮判定（重新起 timer）
+      this.replying.delete(key)
+      const next = this.pending.get(key)
+      if (next && next.lines.length) {
+        const np = paramFor(t)
+        const gap = jitter(np.batchT, config.humanlike.cooldown.jitter)
+        this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), gap), deadlineAt: Date.now() + gap })
+        this.emit()
+      }
     }
   }
 

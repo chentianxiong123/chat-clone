@@ -121,7 +121,10 @@ export const config = {
   },
   // ── 消息处理 / 会话场景 ───────────────────────────────────────────────────
   batch: {
-    n: Number(process.env.BATCH_N) || 5,
+    // 攒批条数随机范围：每轮触发时在 [min,max] 内随机取一个目标数（防固定节奏/防封控）
+    nMin: Number(process.env.BATCH_N_MIN) || Number(process.env.BATCH_N) || 3,
+    nMax: Number(process.env.BATCH_N_MAX) || Number(process.env.BATCH_N) || 5,
+    // 攒批窗口基础值（实际带随机抖动，见 config.humanlike.cooldown.jitter）
     t: Number(process.env.BATCH_T) || 60_000,
   },
   agent: {

@@ -175,7 +175,32 @@ export async function searchRag(query: string): Promise<string> {
     if (picked.length) break
   }
   if (!picked.length) return ''
-  return picked.map(r => r.text.trim()).join('\n---\n')
+  // 关键：只取"本人"发言（assistant 行），剔除对方(user)的发言，
+  // 避免把大肥鱼/朋友的话当"本人原话"注入，导致人格混淆与复读。
+  // 每 chunk 限本人 2 条、全库最多 6 条、总长 ≤ 500 字，防止 RAG 淹没主上下文。
+  const MAX_CHUNKS = 4
+  const MAX_PER_CHUNK = 2
+  const MAX_TOTAL_CHARS = 500
+  const own = (text: string): string[] => text
+    .split('\n')
+    .filter(l => l.startsWith('assistant:'))
+    .map(l => l.replace(/^assistant:\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_PER_CHUNK)
+  let total = 0
+  const lines: string[] = []
+  for (const r of picked.slice(0, MAX_CHUNKS)) {
+    const ownLines = own(r.text)
+    if (!ownLines.length) continue
+    for (const line of ownLines) {
+      if (total + line.length > MAX_TOTAL_CHARS) break
+      lines.push(line)
+      total += line.length
+    }
+    if (total >= MAX_TOTAL_CHARS) break
+  }
+  if (!lines.length) return ''
+  return lines.join('\n--\n')
 }
 
 export async function ragSearch(query: string): Promise<RagResult> {
