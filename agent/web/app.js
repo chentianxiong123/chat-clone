@@ -642,6 +642,97 @@ $('cfg-save').addEventListener('click', async () => {
   note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
 })
 
+function pct2(v) { return Math.round((v || 0) * 100) + '%' }
+function fmtMs(v) { return v > 0 ? (v < 1000 ? v + 'ms' : (v / 1000).toFixed(1) + 's') : '--' }
+const fmtMoney = (v) => (v || 0).toFixed(v > 10 ? 0 : v > 0.1 ? 1 : 2)
+
+// ── 模型管理面板（runtime 热切换）──
+let _models = { active: null, providers: [], remote: [] }
+let _health = []
+async function loadModels() {
+  const r = await fetch('/api/models')
+  _models = await r.json()
+  renderModels()
+}
+async function loadHealth() {
+  const panel = $('model-panels')
+  if (panel) panel.classList.add('opacity-60')
+  const r = await fetch('/api/models/health')
+  _health = (await r.json()).health || []
+  if (panel) panel.classList.remove('opacity-60')
+  renderModels()
+}
+function renderModels() {
+  const panel = $('model-panels')
+  if (!panel) return
+  const activeId = _models.active
+  const health = Object.fromEntries(_health.map(h => [h.id, h]))
+  panel.innerHTML = _models.providers.map(p => {
+    const isActive = p.id === activeId
+    const h = health[p.id]
+    const remoteCount = (_models.remote.find(r => r.providerId === p.id)?.models || []).length
+    const price = (p.pricePerMIn || p.pricePerMOut)
+      ? `¥${fmtMoney(p.pricePerMIn)}/¥${fmtMoney(p.pricePerMOut)}/M`
+      : '未计费'
+    const hTag = h
+      ? (h.ok
+        ? `<span class="text-emerald-400">✓ ${fmtMs(h.latencyMs)}</span>`
+        : `<span class="text-red-400">✗ ${esc((h.error || '').slice(0, 60))}</span>`)
+      : '<span class="text-slate-500">未测</span>'
+    return `<div class="glass round-xl p-4 ${isActive ? 'ring-1 ring-primary/50' : ''}">
+      <div class="flex items-center justify-between mb-1">
+        <div class="font-semibold text-sm flex items-center gap-2">
+          ${isActive ? '<span class="badge badge-primary badge-sm">活跃</span>' : ''}
+          ${esc(p.name)}
+        </div>
+        <span class="text-xs font-mono text-slate-500">${esc(p.model)}</span>
+      </div>
+      <div class="text-xs text-slate-500 mb-2 font-mono break-all">${esc(p.baseUrl || '官方')} · ${price} · 远端 ${remoteCount} 模型</div>
+      <div class="flex items-center gap-2 flex-wrap">
+        ${hTag}
+        <button class="btn btn-xs btn-ghost" onclick="testModel('${esc(p.id)}', this)">测试</button>
+        ${isActive
+          ? '<span class="text-xs text-slate-500">fallback: ' + esc((p.fallback || []).join(', ') || '无') + '</span>'
+          : `<button class="btn btn-xs btn-primary" onclick="switchModel('${esc(p.id)}', this)">切换使用</button>`}
+      </div>
+    </div>`
+  }).join('')
+}
+async function switchModel(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '切换中...' }
+  const r = await fetch('/api/models/switch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  })
+  const res = await r.json()
+  const note = $('model-note')
+  if (res.ok) {
+    note.textContent = `✓ 已切换活跃模型 → ${_models.providers.find(p => p.id === id)?.name}`
+    note.className = 'mt-3 text-xs text-emerald-400'
+    await loadModels()
+  } else {
+    note.textContent = '❌ ' + (res.error || '切换失败')
+    note.className = 'mt-3 text-xs text-red-400'
+    if (btn) { btn.disabled = false; btn.textContent = '切换使用' }
+  }
+}
+async function testModel(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '测试中...' }
+  const r = await fetch('/api/models/test', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  })
+  const res = await r.json()
+  const note = $('model-note')
+  if (res.ok) {
+    note.textContent = `✓ ${id} 可用，耗时 ${fmtMs(res.latencyMs)}`
+    note.className = 'mt-3 text-xs text-emerald-400'
+  } else {
+    note.textContent = `❌ ${id}: ${esc(res.error || '不可用')}`
+    note.className = 'mt-3 text-xs text-red-400'
+  }
+  await loadHealth()
+  if (btn) { btn.disabled = false; btn.textContent = '测试' }
+}
+
 // ── 日志 ──
 let logCount = 0
 function appendLog(entry) {
@@ -662,6 +753,11 @@ $('log-clear').addEventListener('click', () => { $('log-box').innerHTML = ''; lo
 loadConfig()
 loadPresets()
 loadKbMeta()
+loadModels()
+window.testModel = testModel
+window.switchModel = switchModel
+$('model-refresh')?.addEventListener('click', () => { void loadModels() })
+$('model-check')?.addEventListener('click', () => { void loadHealth() })
 setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }, 1000)
 setInterval(() => { if (document.getElementById('page-overview').classList.contains('active')) renderChatFlow() }, 2000)
 

@@ -4,8 +4,9 @@ import { join, extname, normalize } from 'node:path'
 import { AgentCore } from './core.js'
 import { config, minedProfileMeta } from './config.js'
 import { ragSearch, ragStatus } from './rag.js'
-import { callLlmRaw, listModels } from './llm.js'
+import { callLlmRaw, listModels, healthCheckAll } from './llm.js'
 import { getUsageSummary } from './stats.js'
+import { getProvidersFile, getActiveProvider, setActiveProvider, listProviders, testProvider, getProvider } from './models.js'
 import { listSceneSummaries } from './memory.js'
 import { fileURLToPath } from 'node:url'
 
@@ -144,9 +145,19 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
       // ── RAG / LLM 能力状态 ──
       if (path === '/api/status') {
         const rag = await ragStatus()
+        const activeP = getActiveProvider()
         return json(res, 200, {
           rag,
-          llm: { model: config.llm.model, baseUrl: config.llm.baseUrl, configured: !!config.llm.apiKey },
+          llm: {
+            model: activeP?.model ?? config.llm.model,
+            baseUrl: activeP?.baseUrl ?? config.llm.baseUrl,
+            provider: activeP?.name ?? 'default',
+            configured: !!activeP?.apiKey || !!config.llm.apiKey,
+          },
+          models: {
+            providers: listProviders().map(p => ({ id: p.id, name: p.name, model: p.model, active: activeP?.id === p.id })),
+            activeId: activeP?.id ?? null,
+          },
           batch: { n: config.batch.n, t: config.batch.t },
           persona: config.persona,
           agent: config.agent,
@@ -200,9 +211,46 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
         return json(res, 200, result)
       }
 
-      // ── 模型列表 ──
+      // ── 模型列表（所有 provider）──
       if (path === '/api/models') {
-        return json(res, 200, { models: await listModels() })
+        const providers = listProviders().map(p => ({
+          id: p.id,
+          name: p.name,
+          model: p.model,
+          baseUrl: p.baseUrl,
+          pricePerMIn: p.pricePerMIn,
+          pricePerMOut: p.pricePerMOut,
+          fallback: p.fallback ?? [],
+          active: getActiveProvider()?.id === p.id,
+        }))
+        return json(res, 200, {
+          active: getActiveProvider()?.id ?? null,
+          providers,
+          remote: await listModels(),
+        })
+      }
+
+      // ── 模型健康检查（全部 provider 发 ping）──
+      if (path === '/api/models/health') {
+        return json(res, 200, { health: await healthCheckAll() })
+      }
+
+      // ── 切换活跃模型 ──
+      if (path === '/api/models/switch' && req.method === 'POST') {
+        const body = await readBody(req)
+        const id = String(body.id || '')
+        const r = setActiveProvider(id)
+        if (!r.ok) return json(res, 400, { error: r.error })
+        return json(res, 200, { ok: true, active: r.active?.id })
+      }
+
+      // ── 测试单个 provider ──
+      if (path === '/api/models/test' && req.method === 'POST') {
+        const body = await readBody(req)
+        const id = String(body.id || '')
+        const spec = getProvider(id)
+        if (!spec) return json(res, 400, { error: 'unknown provider' })
+        return json(res, 200, { id, ...await testProvider(spec) })
       }
 
       // ── 模拟注入 ──

@@ -1,6 +1,10 @@
 import OpenAI from 'openai'
 import { config } from './config.js'
 import { recordUsage } from './stats.js'
+import {
+  getActiveProvider, getProvider, listProviders, clientFor, testProvider, listModelsFor,
+  type ProviderSpec,
+} from './models.js'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -8,103 +12,121 @@ export interface ChatMessage {
   time?: number
 }
 
-/** 按配置的价格表计算一次调用的费用（元） */
-export function calcLlmCost(tokensIn: number, tokensOut: number): number {
-  const pIn = config.llm.pricePerMIn
-  const pOut = config.llm.pricePerMOut
-  if (!pIn && !pOut) return 0
-  return (tokensIn / 1_000_000) * pIn + (tokensOut / 1_000_000) * pOut
+function priceFor(p: ProviderSpec): { in: number; out: number } {
+  return {
+    in: typeof p.pricePerMIn === 'number' ? p.pricePerMIn : config.llm.pricePerMIn,
+    out: typeof p.pricePerMOut === 'number' ? p.pricePerMOut : config.llm.pricePerMOut,
+  }
 }
 
-const client = new OpenAI({
-  baseURL: config.llm.baseUrl,
-  apiKey: config.llm.apiKey,
-  defaultHeaders: { 'User-Agent': 'chat-clone-agent/0.1.0' },
-})
+/** 按 provider 价格表计算一次调用的费用（元） */
+export function calcLlmCost(tokensIn: number, tokensOut: number): number {
+  const active = getActiveProvider()
+  const price = active ? priceFor(active) : { in: config.llm.pricePerMIn, out: config.llm.pricePerMOut }
+  if (!price.in && !price.out) return 0
+  return (tokensIn / 1_000_000) * price.in + (tokensOut / 1_000_000) * price.out
+}
 
-export async function callLlm(messages: ChatMessage[]): Promise<string> {
-  const maxTokens = config.llm.maxTokens
-  const temperature = config.llm.temperature
-  const attempts = config.llm.retryAttempts
+interface ProviderHealth {
+  id: string
+  ok: boolean
+  latencyMs: number
+  error?: string
+}
 
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const t0 = Date.now()
-    try {
-      const resp = await client.chat.completions.create({
-        model: config.llm.model,
-        messages,
-        max_tokens: maxTokens,
-        temperature,
-      })
-      const content = resp.choices?.[0]?.message?.content
-      const usage = resp.usage
-      const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
-      recordUsage({
-        kind: 'llm',
-        sub: config.llm.model,
-        ok: content ? 1 : 0,
-        fail: 0,
-        cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
-        tokensIn: usage?.prompt_tokens ?? 0,
-        tokensOut: usage?.completion_tokens ?? 0,
-        cachedTokens,
-        ts: Date.now(),
-        durationMs: Date.now() - t0,
-      })
-      if (content) return content.trim()
-      console.warn(`[LLM] 重试 ${attempt + 1}/${attempts}: 空响应`)
-      await sleep(config.llm.retryDelayMs)
-    } catch (e) {
-      recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now(), durationMs: Date.now() - t0 })
-      console.warn(`[LLM] 重试 ${attempt + 1}/${attempts}: ${(e as Error).message}`)
-      await sleep(config.llm.retryDelayMs)
+/** 按活跃 → fallback 链顺序逐一尝试；记录每个 provider 的真实成本/成败 */
+export async function callLlmWithProviders(messages: ChatMessage[], opts: {
+  maxTokens?: number
+  temperature?: number
+  attempts?: number
+  onAttempt?: (p: ProviderSpec, ok: boolean, err?: string) => void
+} = {}): Promise<{ text: string; providerId: string }> {
+  const active = getActiveProvider()
+  if (!active) return { text: '', providerId: '' }
+  const chain: ProviderSpec[] = [active]
+  for (const fb of active.fallback ?? []) {
+    const p = getProvider(fb)
+    if (p && p.enabled !== false && !chain.some(x => x.id === p.id)) chain.push(p)
+  }
+  const maxTokens = opts.maxTokens ?? active.maxTokens ?? config.llm.maxTokens
+  const temperature = opts.temperature ?? active.temperature ?? config.llm.temperature
+  const attempts = opts.attempts ?? config.llm.retryAttempts
+
+  for (const p of chain) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const t0 = Date.now()
+      try {
+        const resp = await clientFor(p).chat.completions.create({
+          model: p.model,
+          messages,
+          max_tokens: maxTokens,
+          temperature,
+        })
+        const content = resp.choices?.[0]?.message?.content
+        const usage = resp.usage
+        const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
+        const price = priceFor(p)
+        const cost = (!price.in && !price.out) ? 0
+          : ((usage?.prompt_tokens ?? 0) / 1_000_000) * price.in + ((usage?.completion_tokens ?? 0) / 1_000_000) * price.out
+        recordUsage({
+          kind: 'llm',
+          sub: `${p.id}/${p.model}`,
+          ok: content ? 1 : 0,
+          fail: 0,
+          cost,
+          tokensIn: usage?.prompt_tokens ?? 0,
+          tokensOut: usage?.completion_tokens ?? 0,
+          cachedTokens,
+          ts: Date.now(),
+          durationMs: Date.now() - t0,
+        })
+        if (content) {
+          opts.onAttempt?.(p, true, undefined)
+          return { text: content.trim(), providerId: p.id }
+        }
+        console.warn(`[LLM] ${p.id}/${p.model} 空响应，重试 ${attempt + 1}/${attempts}`)
+        await sleep(config.llm.retryDelayMs)
+      } catch (e) {
+        const err = (e as Error).message
+        recordUsage({ kind: 'llm', sub: `${p.id}/${p.model}`, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now(), durationMs: Date.now() - t0 })
+        opts.onAttempt?.(p, false, err)
+        console.warn(`[LLM] ${p.id}/${p.model} 失败(${attempt + 1}/${attempts}): ${err}`)
+        await sleep(config.llm.retryDelayMs)
+      }
     }
   }
-  return ''
+  return { text: '', providerId: chain[0]?.id ?? '' }
+}
+
+export async function callLlm(messages: ChatMessage[]): Promise<string> {
+  const { text } = await callLlmWithProviders(messages)
+  return text
 }
 
 /** 直接调用（WebUI 手测 LLM 用），返回完整响应或错误信息 */
-export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: number): Promise<{ ok: boolean; text?: string; error?: string; usage?: { prompt_tokens: number; completion_tokens: number } }> {
-  const t0 = Date.now()
-  try {
-    const resp = await client.chat.completions.create({
-      model: config.llm.model,
-      messages,
-      max_tokens: maxTokensOverride ?? config.llm.maxTokens,
-      temperature: config.llm.temperature,
-    })
-    const content = resp.choices?.[0]?.message?.content
-    const usage = resp.usage
-    const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
-    recordUsage({
-      kind: 'llm',
-      sub: config.llm.model,
-      ok: 1,
-      fail: 0,
-      cost: calcLlmCost(usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0),
-      tokensIn: usage?.prompt_tokens ?? 0,
-      tokensOut: usage?.completion_tokens ?? 0,
-      cachedTokens,
-      ts: Date.now(),
-      durationMs: Date.now() - t0,
-    })
-    if (content) return { ok: true, text: content.trim(), usage }
-    return { ok: true, text: '', usage }
-  } catch (e) {
-    recordUsage({ kind: 'llm', sub: config.llm.model, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now(), durationMs: Date.now() - t0 })
-    return { ok: false, error: (e as Error).message }
-  }
+export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: number): Promise<{ ok: boolean; text?: string; error?: string; usage?: { prompt_tokens: number; completion_tokens: number }; providerId?: string }> {
+  const resp = await callLlmWithProviders(messages, { maxTokens: maxTokensOverride })
+  if (resp.text) return { ok: true, text: resp.text, providerId: resp.providerId }
+  return { ok: false, error: `所有 provider 均失败（last active=${getActiveProvider()?.id}）`, providerId: resp.providerId }
 }
 
-/** 列出可用模型（WebUI 模型选择用） */
-export async function listModels(): Promise<Array<{ id: string }>> {
-  try {
-    const resp = await client.models.list()
-    return resp.data ?? []
-  } catch (e) {
-    console.warn('[LLM] 模型列表失败:', (e as Error).message)
-    return []
+/** 列出所有 provider 的模型（WebUI 模型选择用） */
+export async function listModels(): Promise<Array<{ providerId: string; providerName: string; models: Array<{ id: string }> }>> {
+  const out: Array<{ providerId: string; providerName: string; models: Array<{ id: string }> }> = []
+  for (const p of listProviders()) {
+    out.push({ providerId: p.id, providerName: p.name, models: await listModelsFor(p) })
   }
+  return out
+}
+
+/** 全部 provider 健康探测 */
+export async function healthCheckAll(): Promise<ProviderHealth[]> {
+  const specs = listProviders()
+  const health = await Promise.all(specs.map(async p => {
+    const r = await testProvider(p)
+    return { id: p.id, ok: r.ok, latencyMs: r.latencyMs, error: r.error }
+  }))
+  return health
 }
 
 /** 文本向量化（RAG 检索用），返回 1024 维向量 */

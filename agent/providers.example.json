@@ -1,0 +1,35 @@
+{
+  "active": "agnes25-local",
+  "providers": [
+    {
+      "id": "agnes25-local",
+      "name": "示例：本地 Agnes 2.5",
+      "type": "openai-compatible",
+      "baseUrl": "http://192.168.31.213:8317/v1",
+      "apiKey": "$LLM_API_KEY",
+      "model": "agnes-2.5-flash",
+      "maxTokens": 2048,
+      "temperature": 1.0,
+      "pricePerMIn": 0.5,
+      "pricePerMOut": 2,
+      "timeout": 120000,
+      "fallback": ["other-provider-id"],
+      "enabled": true
+    },
+    {
+      "id": "deepseek-api",
+      "name": "示例：DeepSeek 官方",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKey": "$DEEPSEEK_API_KEY",
+      "model": "deepseek-chat",
+      "maxTokens": 2048,
+      "temperature": 1.0,
+      "pricePerMIn": 1,
+      "pricePerMOut": 2,
+      "timeout": 120000,
+      "fallback": [],
+      "enabled": false
+    }
+  ]
+}

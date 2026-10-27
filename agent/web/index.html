@@ -231,6 +231,17 @@
 
     <!-- ══ 配置 ══ -->
     <section id="page-config" class="page">
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">模型管理（runtime 热切换，无需重启）</div>
+          <div class="flex gap-2">
+            <button id="model-refresh" class="btn btn-sm btn-ghost">刷新</button>
+            <button id="model-check" class="btn btn-sm btn-outline">健康检查</button>
+          </div>
+        </div>
+        <div id="model-panels" class="grid md:grid-cols-2 gap-3 mt-2"></div>
+        <div id="model-note" class="mt-3 text-xs text-emerald-400"></div>
+      </div>
       <div class="glass round-2xl p-5">
         <div class="flex items-center justify-between mb-3">
           <div class="text-sm font-semibold">agent/.env（改完重启生效）</div>
