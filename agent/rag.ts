@@ -181,25 +181,34 @@ export async function searchRag(query: string): Promise<string> {
 export async function ragSearch(query: string): Promise<RagResult> {
   await openDb()
   const topK = config.rag.topK
-  let vec: RagHit[] = []
-  let usedEmbed = false
-
-  // 向量检索（仅当策略包含 vec 且 endpoint 可访问）
-  if (config.rag.strategy.includes('vec') && config.rag.embedEnabled && config.rag.embedEndpoint) {
-    try {
-      const qVec = await embed(query)
-      if (qVec) {
-        vec = await searchVec(qVec, topK)
-        usedEmbed = true
-      }
-    } catch (e) {
-      console.warn('[RAG] embed 失败，跳过向量检索:', (e as Error).message)
-    }
-  }
-
+  // 本地检索先行（fts/like 零成本），顺便决定要不要升级向量
   const kws = extractKeywords(query)
   const fts = searchFts(kws, topK)
   const like = searchLike(query, topK)
+  const localEmpty = fts.length === 0 && like.length === 0
+
+  let vec: RagHit[] = []
+  let usedEmbed = false
+
+  // 向量检索（仅当策略包含 vec 且可用）
+  if (config.rag.strategy.includes('vec') && config.rag.embedEnabled && config.rag.embedEndpoint) {
+    // 混合策略：一般只走本地（fts/like 零成本）省远程 embed API 调用；
+    // 命中 vecProb 概率才升级向量；本地全空时按配置强制兜底
+    const shouldVec = localEmpty && config.rag.vecFallbackOnEmpty
+      ? true
+      : Math.random() < config.rag.vecProb
+    if (shouldVec) {
+      try {
+        const qVec = await embed(query)
+        if (qVec) {
+          vec = await searchVec(qVec, topK)
+          usedEmbed = true
+        }
+      } catch (e) {
+        console.warn('[RAG] embed 失败，跳过向量检索:', (e as Error).message)
+      }
+    }
+  }
 
   return {
     vec,

@@ -86,6 +86,11 @@ export const config = {
     ftsEnabled: process.env.RAG_FTS_ENABLED !== 'false',
     // LIKE 兜底是否启用
     likeEnabled: process.env.RAG_LIKE_ENABLED !== 'false',
+    // 混合检索：一般只走本地 fts/like（零成本），命中此概率才调远程 embed 走向量检索
+    // 0=永不向量（本地纯免费）；1=每次向量（等同旧逻辑）
+    vecProb: clamp01(envNum('RAG_VEC_PROB', 0.3)),
+    // 本地检索全空时是否强制升级向量兜底（保证有人格参考可给；false 则直接返回空）
+    vecFallbackOnEmpty: process.env.RAG_VEC_FALLBACK === 'true',
   },
   // ── Persona / 人格 ────────────────────────────────────────────────────────
   persona: {
