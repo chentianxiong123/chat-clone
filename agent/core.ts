@@ -583,11 +583,9 @@ export class AgentCore {
       if (i === 1) await sleep(jitter(ty.firstDelayMs, config.humanlike.cooldown.jitter))
       else if (gap > 0) await sleep(Math.round(gap))
       if (this.onReply) {
-        if (isBlank) {
-          // 空行也发（作为停顿感）；某些平台不支持空消息则跳过
-          try { await this.onReply(t, id, seg) } catch { /* ignore */ }
-        } else {
-          await this.onReply(t, id, seg)
+        // 单条发送失败不中断整轮（无重试，失败则跳过该条继续发后面的）
+        try { await this.onReply(t, id, seg) } catch (e) {
+          console.warn(`[Core] 分段发送失败(跳过): ${(e as Error).message}`)
         }
       }
       logSeg(i, seg)

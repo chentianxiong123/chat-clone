@@ -84,5 +84,13 @@ process.on('SIGTERM', () => {
   process.exit(0)
 })
 
+// 全局兜底：单条消息/单次请求异常不拖垮整个进程
+process.on('unhandledRejection', reason => {
+  console.error('[Bot] unhandledRejection:', reason)
+})
+process.on('uncaughtException', err => {
+  console.error('[Bot] uncaughtException:', err)
+})
+
 // 保活
 setInterval(() => {}, 60_000)
