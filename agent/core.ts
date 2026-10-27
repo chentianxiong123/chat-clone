@@ -2,6 +2,7 @@ import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage } from './llm.js'
 import { buildSystemPrompt, buildMemoryHintMessage } from './prompt.js'
 import { MEMORY_TOOLS, createMemoryExecutors, needsRecall, searchMemoryNote } from './tools.js'
+import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from './antirepeat.js'
 import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
@@ -179,6 +180,8 @@ export class AgentCore {
   private flushChain = new Map<SceneKey, Promise<void>>()
   /** 回复轮次锁：某场景正在"生成+逐条发送"期间锁住，不再触发新回复；整轮发完才解锁重判 */
   private replying = new Set<SceneKey>()
+  /** 每个场景最近若干条自己的回复（反模板/近重复检测用） */
+  private recentReplies = new Map<SceneKey, string[]>()
   connected = false
   connError?: string
 
@@ -377,6 +380,12 @@ export class AgentCore {
       const systemPrompt = buildSystemPrompt(t)
 
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
+      // 反模板：最近自己回复里的过热词提醒（动态提示，放在历史之后，不破坏长前缀缓存）
+      const ar = config.humanlike.antiRepeat
+      const recent = this.recentReplies.get(key) ?? []
+      const hot = ar.enabled ? hotWords(recent, ar) : []
+      const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
+      const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
       // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
@@ -398,6 +407,7 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(arMsg ? [arMsg] : []),
         ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),
         userMsg,
@@ -417,6 +427,12 @@ export class AgentCore {
       }
       // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
       const reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
+      // 近重复跳过：与近期回复过于相似就别复读了（也顺带降低刷屏）
+      if (ar.enabled && tooSimilar(reply, recent, ar.dropSim)) {
+        console.log(`[Core] ${key} 回复与近期过于相似，跳过`)
+        this.emit()
+        return
+      }
       console.log(`[Core] 回复 ${key}: ${reply}`)
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
@@ -429,6 +445,7 @@ export class AgentCore {
       const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
+      this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
@@ -487,6 +504,11 @@ export class AgentCore {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
+      const ar = config.humanlike.antiRepeat
+      const recent = this.recentReplies.get(key) ?? []
+      const hot = ar.enabled ? hotWords(recent, ar) : []
+      const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
+      const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
@@ -502,6 +524,7 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(arMsg ? [arMsg] : []),
         ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),
         userMsg,
@@ -518,6 +541,7 @@ export class AgentCore {
       const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply, mods.segments)
+      this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)

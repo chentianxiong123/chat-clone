@@ -196,6 +196,15 @@ export const config = {
       minChars: Number(process.env.HL_IGNORE_SHORT_MIN_CHARS) || 0, // 低于此长度 视为无意义
       prob: clamp01(Number(process.env.HL_IGNORE_SHORT_PROB) || 0),  // 命中后沉默概率
     },
+    // 反模板/反复读：最近 N 条自己回复的高频词提醒 + 近重复跳过，避免一个词锁死（如"剑魔"75%）
+    antiRepeat: {
+      enabled: process.env.HL_ANTIREPEAT !== 'false',
+      window: Math.max(3, Math.round(envNum('HL_ANTIREPEAT_WINDOW', 20))),
+      minCount: Math.max(2, Math.round(envNum('HL_ANTIREPEAT_MIN_COUNT', 3))),
+      ratio: clamp01(envNum('HL_ANTIREPEAT_RATIO', 0.25)),
+      dropSim: clamp01(envNum('HL_ANTIREPEAT_SIM_THRESHOLD', 0.85)),
+      maxHint: Math.max(1, Math.round(envNum('HL_ANTIREPEAT_MAX_HINT', 6))),
+    },
     // ── B. 反应与节奏 —— 多久回 ──
     react: {
       minMs: Number(process.env.REPLY_REACT_MIN_MS) || 2500,
