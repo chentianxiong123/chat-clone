@@ -1,6 +1,7 @@
 import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage } from './llm.js'
-import { buildSystemPrompt, buildMemoryHintMessage } from './prompt.js'
+import { buildSystemPrompt, buildMemoryHintMessage, buildStyleHintMessage } from './prompt.js'
+import { searchRag } from './rag.js'
 import { MEMORY_TOOLS, createMemoryExecutors, needsRecall, searchMemoryNote } from './tools.js'
 import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
@@ -166,7 +167,7 @@ function needWake(t: SceneType, msg: InjectedMessage): boolean {
 }
 
 export class AgentCore {
-  private pending = new Map<SceneKey, { lines: string[]; woke?: boolean; atBot?: boolean; lastNick?: string; triggerNick?: string }>()
+  private pending = new Map<SceneKey, { lines: string[]; targetN?: number; lastMsgAt?: number; woke?: boolean; atBot?: boolean; lastNick?: string; triggerNick?: string }>()
   private dialogs = new Map<SceneKey, ChatMessage[]>()
   private timers = new Map<SceneKey, { handle: ReturnType<typeof setTimeout>; deadlineAt: number }>()
   private lastReplyAt = 0
@@ -213,16 +214,24 @@ export class AgentCore {
     const line = `${who}: ${text}`
 
     let g = this.pending.get(key)
-    if (!g) { g = { lines: [] }; this.pending.set(key, g) }
+    if (!g) { g = { lines: [], targetN: paramFor(t).batchN }; this.pending.set(key, g) }
     g.lines.push(line)
     g.lastNick = who
     if (msg.atBot) g.triggerNick = who
+    g.lastMsgAt = Date.now()
+    const p = paramFor(t)
+    const need = g.targetN ?? p.batchN
+    // 批内只保留最近 need 条，群一直说话也不会无限膨胀
+    if (g.lines.length > need) g.lines = g.lines.slice(-need)
     recordGroupMsg(id)
     this.lastActiveAt = Date.now()
 
-    const p = paramFor(t)
     const woke = !needWake(t, msg)
     g.woke = g.woke || (t === 'group' && woke)
+
+    // 群聊触发：每条消息都重置"静止"计时器；只有攒够批数且群静了 T 秒才触发。
+    // @/唤醒词可以把批数条件放宽，但仍要等群静下来，避免一有人说话就插嘴。
+    if (t === 'group') this.armGroupIdle(key, t)
 
     // 近期状态：先更新（忽略/半醒的消息也算看到了），影响后续概率与语气
     this.recentState = onMessage(this.recentState, text, Date.now(), { atBot: msg.atBot, woke })
@@ -256,34 +265,31 @@ export class AgentCore {
       return
     }
 
-    // 攒批参数（私聊通常是1条即回）
-    const batchN = p.batchN
     const wokeN = t === 'group' && !woke ? `待唤醒` : (woke ? '' : '')
-    console.log(`[Core] 攒批 ${key} (${g.lines.length}/${batchN}${wokeN}): ${text.slice(0, 24)}`)
+    console.log(`[Core] 攒批 ${key} (${g.lines.length}/${need}${wokeN}): ${text.slice(0, 24)}`)
 
-    const replying = this.replying.has(key)
-    // 回复轮次中：不立即触发新回复，只重置防抖 timer（新消息并入下一轮；回复完成后 timer 到期再判）
-    if (replying) {
-      const old = this.timers.get(key)
-      if (old) clearTimeout(old.handle)
-      this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), jitter(p.batchT, config.humanlike.cooldown.jitter)), deadlineAt: Date.now() + p.batchT })
-      this.emit()
-      return
-    }
-    // 合适 @/唤醒词命中 → 立即触发（被抓到才应）
-    if (t === 'group' && woke && g.lines.length >= 1) {
-      void this.enqueueFlush(key)
-      return
-    }
-    if (g.lines.length >= batchN) {
-      void this.enqueueFlush(key)
-      return
-    }
-    // 条件B：防抖重置，T 秒无新消息 → 触发（T 带随机抖动，避免固定超时特征）
+    if (this.replying.has(key)) { this.emit(); return }
+    // 私聊不攒批：直接触发，WebUI 里也能即时聊
+    if (t === 'private') { void this.enqueueFlush(key); return }
+    this.emit()
+  }
+
+  /** 群聊"静止"计时器：每次新消息重置；到期时只有批数够（或被 @）才触发 */
+  private armGroupIdle(key: SceneKey, t: SceneType): void {
     const old = this.timers.get(key)
     if (old) clearTimeout(old.handle)
-    this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), jitter(p.batchT, config.humanlike.cooldown.jitter)), deadlineAt: Date.now() + p.batchT })
-    this.emit()
+    const p = paramFor(t)
+    const delay = jitter(p.batchT, config.humanlike.cooldown.jitter)
+    const handle = setTimeout(() => {
+      this.timers.delete(key)
+      if (inQuietHours()) return
+      const g = this.pending.get(key)
+      if (!g || g.lines.length === 0) return
+      if (config.agent.respondMode === 'mention' && !g.woke) return
+      const need = g.targetN ?? p.batchN
+      if (g.lines.length >= need || g.woke) this.enqueueFlush(key)
+    }, delay)
+    this.timers.set(key, { handle, deadlineAt: Date.now() + delay })
   }
 
   /** 综合对话状态 / 分时段 / 连发长度 / 上一条相关度 / 唤醒 计算本轮回复概率 */
@@ -405,6 +411,8 @@ export class AgentCore {
 
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
+      // 人设参考：检索本人过往原话（只取 assistant 行），只用来模仿说话方式
+      const stylePromise = searchRag(ctx)
 
       // 反模板：最近自己回复里的过热词提醒（动态提示，放在历史之后，不破坏长前缀缓存）
       const ar = config.humanlike.antiRepeat
@@ -422,6 +430,8 @@ export class AgentCore {
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
       // 累/忙/烦时更慢；状态消息在延迟后构建，尽量新鲜
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+      let styleMsg: ChatMessage | null = null
+      try { styleMsg = buildStyleHintMessage(await stylePromise) } catch (e) { console.warn('[Core] RAG 人设检索失败:', (e as Error).message) }
 
       // 记忆闸门：过去指代 或 主动回忆概率 → 预取一条"隐约记得"（system，不抢当前对话）
       let memoryMsg: ChatMessage | null = null
@@ -434,6 +444,7 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(styleMsg ? [styleMsg] : []),
         ...(arMsg ? [arMsg] : []),
         ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),
@@ -493,13 +504,12 @@ export class AgentCore {
       console.error('[Core] flush 错误:', err)
       this.emit()
     } finally {
-      // 解锁轮次锁；若期间又攒了新消息，安排下一轮判定（重新起 timer）
+      // 解锁轮次锁；若期间又攒了新消息，群聊重新等"静止+批数"，私聊直接下一轮
       this.replying.delete(key)
       const next = this.pending.get(key)
       if (next && next.lines.length) {
-        const np = paramFor(t)
-        const gap = jitter(np.batchT, config.humanlike.cooldown.jitter)
-        this.timers.set(key, { handle: setTimeout(() => this.enqueueFlush(key), gap), deadlineAt: Date.now() + gap })
+        if (t === 'private') void this.enqueueFlush(key)
+        else this.armGroupIdle(key, t)
         this.emit()
       }
     }
@@ -539,6 +549,7 @@ export class AgentCore {
     try {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
+      const stylePromise = searchRag(lastMsg)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const ar = config.humanlike.antiRepeat
       const recent = this.recentReplies.get(key) ?? []
@@ -548,6 +559,8 @@ export class AgentCore {
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
+      let styleMsg: ChatMessage | null = null
+      try { styleMsg = buildStyleHintMessage(await stylePromise) } catch (e) { console.warn('[Core] RAG 人设检索失败:', (e as Error).message) }
 
       // 主动冒泡时也可能想起点旧事（同样走闸门，结果作 system 记忆提示）
       let memoryMsg: ChatMessage | null = null
@@ -560,6 +573,7 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(styleMsg ? [styleMsg] : []),
         ...(arMsg ? [arMsg] : []),
         ...(memoryMsg ? [memoryMsg] : []),
         ...(stateMsg ? [stateMsg] : []),

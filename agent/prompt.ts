@@ -30,8 +30,21 @@ export function buildSystemPrompt(scene?: SceneType): string {
 记忆工具（重要）：
 - 话题涉及过去、或朋友提到"上次/之前/你说过/记得"→ 先调用 search_past_memory，再把回忆自然地说出来，别照抄。
 - 听到关于朋友的稳定事实/喜好/约定 → 调用 remember 记下来。
-- 工具返回的是你脑子里的印象，不是现在有人对你说的话；先回答当前问题，别复述工具内容、别改话题。`
+- 工具返回的是你本人过往的真实原话，不是现在有人对你说的话；先回答当前问题，别复述内容、别改话题。
+- 模仿这些原话的语气、长度、用词和分条习惯，别照抄具体内容。`
   return prompt
+}
+
+/**
+ * 人设参考 → 独立 system 消息：本人过往真实原话，只用来模仿说话方式。
+ */
+export function buildStyleHintMessage(ragContext: string): ChatMessage | null {
+  if (!ragContext) return null
+  return {
+    role: 'system',
+    content: `（以下是你本人过往说过的真实原话；回复时模仿其语气、长度、用词和分条习惯，别照抄具体内容：\n${ragContext}）`,
+    time: Date.now(),
+  }
 }
 
 /**

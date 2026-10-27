@@ -140,9 +140,9 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
 
   const segMin = clamp(Math.round(safe(stats.burstGapSec.p25) * 1000), 300, 5000)
   const segMax = clamp(Math.round(safe(stats.burstGapSec.p75) * 1000), segMin + 300, 15000)
-  const maxSeg = clamp(Math.round(safe(stats.burstLen.p90)), 2, 6)
-  const maxChars = clamp(Math.round(safe(stats.turnChars.p90) * 1.2), 60, 240)
-  const maxSegmentChars = clamp(Math.round(safe(stats.selfMsgChars.p95)), 8, 30)
+  const maxSeg = 0
+  const maxChars = 0
+  const maxSegmentChars = 0
 
   const overall = safe(stats.replyRate, 0.9) || 0.9
   const hourly = (stats.hourlyReply.length === 24 ? stats.hourlyReply : []).map(r =>
@@ -311,8 +311,8 @@ export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): strin
     }
   }
 
-  // 4) 长度收敛：超 maxChars 截断到句子边界 + 省略号（防小作文）
-  if (out.length > maxChars) {
+  // 4) 长度收敛：0=不限；否则超 maxChars 截断到句子边界 + 省略号
+  if (maxChars > 0 && out.length > maxChars) {
     const slice = out.slice(0, maxChars)
     const cutAt = Math.max(
       slice.lastIndexOf('。'), slice.lastIndexOf('！'), slice.lastIndexOf('？'),

@@ -110,19 +110,9 @@ export const config = {
     // 群里被这样的词叫时会被唤醒（逗号分隔，命中即视为 @✓）
     wakeWords: (process.env.PERSONA_WAKE_WORDS || '崽种,qq,机器人').split(',').map(s => s.trim()).filter(Boolean),
     // 系统提示模板({name} / {friend} / {rag} 会被替换)
-    systemPromptTemplate: process.env.PERSONA_SYSTEM_PROMPT || `你是{name} 你在群里跟朋友瞎聊
+    systemPromptTemplate: process.env.PERSONA_SYSTEM_PROMPT || `你是{name}，在群里跟朋友聊天。
 
-接话规则：
-- 别人问"在吗/有人吗/吃了没"这类 → 不回答 直接说自己正在做的事
-- 别人征求意见 → 一本正经分析 像专家发表见解
-- 别人催你 → 岔开说自己忙的事
-- 别人怼你 → 不屑式短回 不解释
-
-说话分寸：
-- 嘴皮子碎、爱阴阳怪气都行，但别开口闭口爆粗，脏字当调味料偶尔来一句就够了
-- 对方不惹你时，怼人用损和调侃，别一上来就喷
-
-回复最多3句 不加标点
+回复时尽量模仿下面你本人过往的真实聊天记录：语气、长度、用词、分条习惯都照着来，不要像助手，不要解释自己在模仿。
 
 {rag}`,
     // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
@@ -250,8 +240,8 @@ export const config = {
         minMs: Number(process.env.SEGMENT_GAP_MIN_MS) || 900,
         maxMs: Number(process.env.SEGMENT_GAP_MAX_MS) || 3200,
       },
-      // 一次回复最多拆成几条（超出合并），真人不会狂刷几十条
-      maxSegments: Number(process.env.HL_MAX_SEGMENTS) || 6,
+      // 一次回复最多拆成几条（0=不限，按回车全发）
+      maxSegments: Math.max(0, Math.round(envNum('HL_MAX_SEGMENTS', 0))),
       // 第一条发出前的短暂迟疑
       firstDelayMs: Number(process.env.SEGMENT_FIRST_DELAY_MS) || 500,
       // 按换行拆分逐条发送
@@ -261,8 +251,8 @@ export const config = {
     },
     // ── D. 话术风格 —— 说成什么样（LLM 输出后轻量后处理）──
     style: {
-      // 回复超长自动收敛（防小作文），超出的在句子边界截断+省略号
-      maxChars: Number(process.env.HL_STYLE_MAX_CHARS) || 120,
+      // 回复超长自动收敛（0=不限，不截断）
+      maxChars: Math.max(0, Math.round(envNum('HL_STYLE_MAX_CHARS', 0))),
       // 单条消息字数上限（0=关；超长优先在标点处再拆一条）
       maxSegmentChars: envNum('HL_MAX_SEGMENT_CHARS', 0),
       // 句尾偶发表情
