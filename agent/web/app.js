@@ -26,6 +26,8 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     btn.classList.add('active')
     const page = btn.dataset.page
     $('page-' + page).classList.add('active')
+    if (page === 'chat') history.replaceState(null, '', '#chat')
+    else if (location.hash) history.replaceState(null, '', location.pathname + location.search)
     if (page === 'stats') loadStats(currentRange)
     if (page === 'persona') { loadPersona(); loadMemory() }
     if (page === 'kb') loadKbMeta()
@@ -84,7 +86,6 @@ function renderState(snap) {
   }
   list.innerHTML = groups.map((g) => renderGroup(g)).join('')
   bindGroupButtons()
-  renderChatFlow()
 }
 
 // ── 近期状态卡片 ──
@@ -209,77 +210,6 @@ function bindGroupButtons() {
 $('ov-clear-all').addEventListener('click', async () => {
   if (!confirm('清空所有群的会话记忆？')) return
   await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
-})
-
-// ── 聊天流（支持场景选择）──
-let chatPickKey = null
-function renderChatFlow() {
-  if (!currentSnap) return
-  const scenes = Object.values(currentSnap.scenes || currentSnap.groups)
-  // 同步场景选择器选项
-  const pick = $('chat-scene-pick')
-  const cur = chatPickKey && scenes.some(s => s.key === chatPickKey) ? chatPickKey : (scenes[0]?.key || null)
-  const opts = scenes.map(s => `<option value="${s.key}">${s.title}</option>`).join('')
-  if (pick.innerHTML !== opts && pick.innerHTML !== `<option value="">${'-- 无 --'}</option>`) {
-    pick.innerHTML = scenes.length ? opts : `<option value="">-- 无 --</option>`
-  }
-  if (cur) pick.value = cur
-  const sc = scenes.find(s => s.key === cur)
-  const box = $('chat-flow')
-  $('chat-scene-label').textContent = sc ? `· ${sc.title}` : ''
-  if (!sc || !sc.dialog.length) {
-    box.innerHTML = `<div class="text-center text-slate-600 text-sm py-8">暂无对话，先在下面「模拟消息」注入一条</div>`
-    return
-  }
-  // 消息体：assistant 按换行拆成多条气泡（和真实发送一致：回车分割逐条发）
-  const bubbles = (m) => {
-    const isBot = m.role !== 'user'
-    const lines = isBot ? String(m.content).split('\n') : [m.content]
-    const valid = lines.filter((l) => l.trim() !== '').length ? lines : lines
-    const header = `<div class="text-[10px] text-slate-500 mb-1">${m.role === 'user' ? '👤 群友' : '🤖 ' + (currentSnap?.selfName || '我')} · ${m.time ? fmtTime(m.time) : ''}</div>`
-    const body = valid.map((l) => l.trim() === ''
-      ? `<div class="text-[8px] text-slate-700 py-0.5">· · ·</div>`
-      : `<div class="whitespace-pre-wrap break-words">${esc(l)}</div>`).join('')
-    return `${header}${body}`
-  }
-  box.innerHTML = sc.dialog.map((m) => `
-    <div class="flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}">
-      <div class="max-w-[80%] round-xl px-4 py-2 text-sm ${m.role === 'user' ? 'bg-slate-800/70 text-sky-200' : 'bg-indigo-600/50 text-emerald-100'}">
-        ${bubbles(m)}
-      </div>
-    </div>`).join('')
-  box.scrollTop = box.scrollHeight
-}
-$('chat-scene-pick')?.addEventListener('change', (e) => { chatPickKey = e.target.value; renderChatFlow() })
-
-// ── 聊天页注入（私聊/群聊）──
-function simScene() { return $('sim-scene').value === 'private' ? 'private' : 'group' }
-function simId() { return $('sim-id').value || '900001' }
-
-$('sim-send').addEventListener('click', async () => {
-  const text = $('sim-text').value.trim()
-  if (!text) return
-  const body = {
-    scene: simScene(),
-    groupId: simId(),
-    senderId: simId(),
-    senderNick: $('sim-who').value || '测试员',
-    text,
-    atBot: $('sim-at').checked,
-  }
-  const r = await fetch('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  const res = await r.json()
-  $('sim-result').classList.remove('hidden')
-  $('sim-result').textContent = `注入成功 → ${res.scene === 'private' ? '私聊' : '群'} ${res.id}，已进入攒批队列${body.atBot ? '（@bot）' : ''}`
-  $('sim-text').value = ''
-})
-$('sim-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sim-send').click() })
-
-$('sim-flush').addEventListener('click', async () => {
-  const key = (simScene() === 'private' ? 'p:' : 'g:') + simId()
-  await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
-  $('sim-result').classList.remove('hidden')
-  $('sim-result').textContent = `已触发 ${key} 攒批`
 })
 
 // ── 人设 ──
@@ -764,7 +694,9 @@ window.switchModel = switchModel
 $('model-refresh')?.addEventListener('click', () => { void loadModels() })
 $('model-check')?.addEventListener('click', () => { void loadHealth() })
 setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }, 1000)
-setInterval(() => { if (document.getElementById('page-overview').classList.contains('active')) renderChatFlow() }, 2000)
 
 // 首次状态（SSE 会推，兜底拉一次）
 fetch('/api/state').then((r) => r.json()).then((snap) => renderState(snap)).catch(() => {})
+
+// 支持 /console 跳转后直接打开聊天页
+if (location.hash === '#chat') document.querySelector('.side-item[data-page="chat"]')?.click()

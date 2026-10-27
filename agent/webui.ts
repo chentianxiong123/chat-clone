@@ -478,6 +478,13 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { ok: true, note: '配置已保存，重启 agent 后生效' })
       }
 
+      // ── /console 兼容入口：统一进主控制台聊天页 ──
+      if (path === '/console') {
+        res.writeHead(302, { Location: '/#chat' })
+        res.end()
+        return
+      }
+
       // ── 静态文件 ──
       const filePath = serveStatic(path)
       if (filePath) {
@@ -513,7 +520,6 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 function serveStatic(path: string): string | null {
   // 安全：只允许 / 或 /web 前缀，路径规范化后必须在 WEB_DIR 内
   let rel = path === '/' ? 'index.html' : path.replace(/^\/+/, '')
-  if (rel === 'console') rel = 'console.html'
   // /web/* 剥掉前缀（浏览器引用的静态资源路径），其余按 WEB_DIR 相对路径
   if (rel.startsWith('web/')) rel = rel.slice(4)
   if (rel.startsWith('api/')) return null
