@@ -64,7 +64,8 @@ export async function callLlmWithProviders(messages: ChatMessage[], opts: {
         })
         const content = resp.choices?.[0]?.message?.content
         const usage = resp.usage
-        const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
+        const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens
+          ?? (usage as any)?.prompt_cache_hit_tokens ?? 0
         const price = priceFor(p)
         const cost = (!price.in && !price.out) ? 0
           : ((usage?.prompt_tokens ?? 0) / 1_000_000) * price.in + ((usage?.completion_tokens ?? 0) / 1_000_000) * price.out
@@ -176,7 +177,8 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
       const usage = resp.usage
       const content: string = msg?.content ?? ''
       const calls: any[] | undefined = msg?.tool_calls
-      const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0
+      const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens
+        ?? (usage as any)?.prompt_cache_hit_tokens ?? 0
       const price = priceFor(p)
       const cost = (!price.in && !price.out) ? 0
         : ((usage?.prompt_tokens ?? 0) / 1_000_000) * price.in + ((usage?.completion_tokens ?? 0) / 1_000_000) * price.out

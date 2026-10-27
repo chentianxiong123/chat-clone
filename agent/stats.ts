@@ -249,7 +249,9 @@ export function getUsageSummary(hours = 24): UsageSummary {
       perModel[key] = em
     }
     if (r.kind === 'llm' || r.kind === 'embed') {
-      const key = r.kind === 'llm' ? 'LLM' : 'Embed'
+      // sub 形如 "provider/model"；按 provider 聚合，老数据没有 provider 前缀则归到 LLM
+      const parts = (r.sub || '').split('/')
+      const key = r.kind === 'embed' ? 'Embed' : (parts.length > 1 ? parts[0] : 'LLM')
       const p = perProvider[key] ?? { calls: 0, cost: 0 }
       p.calls += r.ok + r.fail
       p.cost += r.cost

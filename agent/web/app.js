@@ -430,9 +430,15 @@ async function loadStats(hours) {
 
   // 费用
   const cost = agg.totalCost || 0
+  const providers = s.perProvider || {}
+  const provLine = Object.entries(providers)
+    .filter(([k]) => k !== 'Embed')
+    .sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0))
+    .map(([k, v]) => `${k} ¥${(v.cost || 0).toFixed(4)}`)
+    .join(' · ')
   $('st-cost').textContent = cost > 0 ? '¥' + cost.toFixed(4) : '¥0'
   $('st-cost-sub').innerHTML = (cost > 0
-    ? `LLM ¥${(llm.cost || 0).toFixed(4)} · Embed ¥${(embed.cost || 0).toFixed(4)}`
+    ? `LLM ¥${(llm.cost || 0).toFixed(4)} · Embed ¥${(embed.cost || 0).toFixed(4)}${provLine ? '<br>' + provLine : ''}`
     : '未配置价格（LLM_PRICE_PER_M_IN/OUT）→ 免费')
 
   $('st-llm').textContent = String(llm.calls || 0)
@@ -643,7 +649,6 @@ $('cfg-save').addEventListener('click', async () => {
 })
 
 function pct2(v) { return Math.round((v || 0) * 100) + '%' }
-function fmtMs(v) { return v > 0 ? (v < 1000 ? v + 'ms' : (v / 1000).toFixed(1) + 's') : '--' }
 const fmtMoney = (v) => (v || 0).toFixed(v > 10 ? 0 : v > 0.1 ? 1 : 2)
 
 // ── 模型管理面板（runtime 热切换）──
