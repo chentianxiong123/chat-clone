@@ -386,6 +386,7 @@ export class AgentCore {
       const hot = ar.enabled ? hotWords(recent, ar) : []
       const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
       const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
+      if (arHint) console.log(`[Core] ${key} 反模板提示: ${hot.join('、')}`)
       // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
