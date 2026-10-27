@@ -2,8 +2,10 @@ import { createServer } from 'node:http'
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import { AgentCore } from './core.js'
+import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'
-import { ragSearch, ragStatus } from './rag.js'
+import { ragSearch, ragStatus, searchRag } from './rag.js'
+import { buildSystemPrompt, buildStyleHintMessage } from './prompt.js'
 import { callLlmRaw, listModels, healthCheckAll } from './llm.js'
 import { getUsageSummary } from './stats.js'
 import { getProvidersFile, getActiveProvider, setActiveProvider, listProviders, testProvider, getProvider } from './models.js'
@@ -79,8 +81,15 @@ const ENV_PRESETS: Array<{ name: string; label: string; description: string; pat
   },
 ]
 
-export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
+export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof createServer> {
   const clients = new Set<{ write: (s: string) => void }>()
+  const v2Clients = new Set<{ write: (s: string) => void }>()
+  if (v2) {
+    v2.subscribe(ev => {
+      const payload = `data: ${JSON.stringify(ev)}\n\n`
+      for (const c of v2Clients) c.write(payload)
+    })
+  }
 
   // 核心状态变化 → SSE 广播
   const unsubscribe = core.subscribe(snap => {
@@ -113,6 +122,126 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
     const path = decodeURIComponent(url.pathname)
 
     try {
+      // ── v2 控制台：事件流 ──
+      if (path === '/api/v2/stream') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        })
+        res.write(`data: ${JSON.stringify({ type: 'hello', snapshot: v2.getSnapshot() })}\n\n`)
+        const client = { write: (s: string) => res.write(s) }
+        v2Clients.add(client)
+        req.on('close', () => { v2Clients.delete(client) })
+        return
+      }
+
+      // ── v2 控制台：线程列表 ──
+      if (path === '/api/v2/threads') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        return json(res, 200, { threads: v2.getThreads(), snapshot: v2.getSnapshot() })
+      }
+
+      // ── v2 控制台：新建/确保模拟会话（真群号一律拒绝）──
+      if (path === '/api/v2/threads/sim' && req.method === 'POST') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const body = await readBody(req)
+        const kind = body.kind === 'private' ? 'private' : 'group'
+        const rawId = body.id ?? body.groupId ?? body.senderId
+        const id = rawId === undefined || rawId === '' ? undefined : Number(rawId)
+        if (id !== undefined && !Number.isFinite(id)) return json(res, 400, { error: 'invalid id' })
+        try {
+          const meta = v2.createSimThread(kind, id)
+          return json(res, 200, { ok: true, thread: meta })
+        } catch (e) {
+          return json(res, 400, { error: (e as Error).message })
+        }
+      }
+
+      // ── v2 控制台：线程详情 ──
+      if (path.startsWith('/api/v2/thread/') && !path.endsWith('/message') && !path.endsWith('/pause') && !path.endsWith('/clear') && !path.endsWith('/trigger')) {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const id = path.slice('/api/v2/thread/'.length)
+        if (!v2.parseThread(id)) return json(res, 400, { error: 'bad thread id' })
+        const detail = v2.getThread(id)
+        if (!detail.meta) return json(res, 404, { error: 'thread not found' })
+        v2.markRead(id)
+        return json(res, 200, { ...detail, snapshot: v2.getSnapshot() })
+      }
+
+      // ── v2 控制台：发消息（只允许 sim 通道；真群/真私聊拒绝）──
+      if (path.startsWith('/api/v2/thread/') && path.endsWith('/message') && req.method === 'POST') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const id = path.slice('/api/v2/thread/'.length, -'/message'.length)
+        const ref = v2.parseThread(id)
+        if (!ref) return json(res, 400, { error: 'bad thread id' })
+        if (ref.channel !== 'sim') return json(res, 403, { error: '控制台只允许模拟通道，真群/真私聊请走 QQ adapter' })
+        if (ref.kind === 'group' && (ref.externalId < config.sim.groupMin || ref.externalId > config.sim.groupMax)) {
+          return json(res, 403, { error: `模拟群号必须在 ${config.sim.groupMin}~${config.sim.groupMax}` })
+        }
+        const body = await readBody(req)
+        const text = String(body.text ?? '').trim()
+        if (!text) return json(res, 400, { error: 'empty text' })
+        const senderNick = String(body.senderNick ?? (ref.kind === 'group' ? '测试员' : '朋友'))
+        const senderId = Number(body.senderId) || (ref.kind === 'group' ? 10001 : ref.externalId)
+        const run = await v2.handleMessage({
+          thread: ref,
+          senderId,
+          senderNick,
+          text,
+          atBot: !!body.atBot,
+          simulated: true,
+          policy: !!body.policy,
+          at: Date.now(),
+        })
+        v2.markRead(id)
+        return json(res, 200, { ok: true, run })
+      }
+
+      // ── v2 控制台：手动触发一轮（注入一条调试消息）──
+      if (path.startsWith('/api/v2/thread/') && path.endsWith('/trigger') && req.method === 'POST') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const id = path.slice('/api/v2/thread/'.length, -'/trigger'.length)
+        const ref = v2.parseThread(id)
+        if (!ref) return json(res, 400, { error: 'bad thread id' })
+        if (ref.channel !== 'sim') return json(res, 403, { error: '控制台只允许模拟通道' })
+        if (v2.flushThread(id)) return json(res, 200, { ok: true, flushed: true })
+        const run = await v2.handleMessage({
+          thread: ref, senderId: 0, senderNick: '系统',
+          text: '（手动触发，接着刚才的话题说一句）', simulated: true, at: Date.now(),
+        })
+        return json(res, 200, { ok: true, flushed: false, run })
+      }
+
+      // ── v2 控制台：暂停/恢复 ──
+      if (path.startsWith('/api/v2/thread/') && path.endsWith('/pause') && req.method === 'POST') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const id = path.slice('/api/v2/thread/'.length, -'/pause'.length)
+        if (!v2.parseThread(id)) return json(res, 400, { error: 'bad thread id' })
+        const body = await readBody(req)
+        const meta = v2.setPaused(id, !!body.paused)
+        if (!meta) return json(res, 404, { error: 'thread not found' })
+        return json(res, 200, { ok: true, thread: meta })
+      }
+
+      // ── v2 控制台：清空会话 ──
+      if (path.startsWith('/api/v2/thread/') && path.endsWith('/clear') && req.method === 'POST') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const id = path.slice('/api/v2/thread/'.length, -'/clear'.length)
+        if (!v2.parseThread(id)) return json(res, 400, { error: 'bad thread id' })
+        v2.clearThread(id)
+        return json(res, 200, { ok: true })
+      }
+
+      // ── v2 控制台：事件回放 ──
+      if (path === '/api/v2/events') {
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        const thread = url.searchParams.get('thread') || undefined
+        const limit = Number(url.searchParams.get('limit')) || 200
+        return json(res, 200, { events: v2.getEvents(thread, limit) })
+      }
+
       // ── SSE 状态流 ──
       if (path === '/api/stream') {
         res.writeHead(200, {
@@ -202,14 +331,14 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
         const body = await readBody(req)
         const prompt = body.prompt || ''
         const withRag = body.withRag !== false
-        let ragCtx = ''
-        if (withRag) {
-          const r = await ragSearch(prompt)
-          const picked = r.vec.length ? r.vec : r.fts.length ? r.fts : r.like
-          ragCtx = picked.map(x => x.text.trim()).join('\n---\n')
-        }
-        const system = `你是${config.persona.name} 你在群里跟朋友瞎聊\n\n接话规则：\n- 别人问"在吗/有人吗/吃了没"这类 → 不回答 直接说自己正在做的事\n- 别人征求意见 → 一本正经分析 像专家发表见解\n- 别人催你 → 岔开说自己忙的事\n- 别人怼你 → 不屑式短回 不解释\n\n回复最多3句 不加标点\n${ragCtx ? '以下聊天记录是本人说过的真实原话，你说话就这味道：\n' + ragCtx : ''}`
-        const result = await callLlmRaw([{ role: 'system', content: system }, { role: 'user', content: prompt }])
+        const ragCtx = withRag ? await searchRag(prompt) : ''
+        const styleMsg = buildStyleHintMessage(ragCtx)
+        const messages = [
+          { role: 'system' as const, content: buildSystemPrompt('group') },
+          ...(styleMsg ? [styleMsg] : []),
+          { role: 'user' as const, content: prompt },
+        ]
+        const result = await callLlmRaw(messages)
         return json(res, 200, result)
       }
 
@@ -259,10 +388,13 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
       if (path === '/api/simulate' && req.method === 'POST') {
         const body = await readBody(req)
         const scene: 'group' | 'private' = body.scene === 'private' ? 'private' : 'group'
-        const id = Number(body.groupId || body.senderId) || 10000
+        const id = Number(body.groupId || body.senderId) || (scene === 'group' ? config.sim.defaultGroup : 10001)
         const who = body.senderNick || '测试员'
         const text = body.text || ''
         if (!text) return json(res, 400, { error: 'empty text' })
+        if (scene === 'group' && (id < config.sim.groupMin || id > config.sim.groupMax)) {
+          return json(res, 403, { error: `模拟群号必须在 ${config.sim.groupMin}~${config.sim.groupMax}，真群请走 QQ 通道` })
+        }
         core.handleMessage({
           scene,
           groupId: id,
@@ -270,6 +402,7 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
           senderNick: who,
           text,
           atBot: !!body.atBot,
+          simulated: true,
         })
         return json(res, 200, { ok: true, scene, id })
       }
@@ -380,6 +513,7 @@ export function startWebUI(core: AgentCore): ReturnType<typeof createServer> {
 function serveStatic(path: string): string | null {
   // 安全：只允许 / 或 /web 前缀，路径规范化后必须在 WEB_DIR 内
   let rel = path === '/' ? 'index.html' : path.replace(/^\/+/, '')
+  if (rel === 'console') rel = 'console.html'
   // /web/* 剥掉前缀（浏览器引用的静态资源路径），其余按 WEB_DIR 相对路径
   if (rel.startsWith('web/')) rel = rel.slice(4)
   if (rel.startsWith('api/')) return null

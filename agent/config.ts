@@ -337,6 +337,16 @@ export const config = {
       },
     },
   },
+  // ── 模拟通道（与真群隔离；不落 QQ 统计）──────────────────────────────────
+  sim: {
+    groupMin: envNum('SIM_GROUP_MIN', 900000),
+    groupMax: envNum('SIM_GROUP_MAX', 999999),
+    defaultGroup: envNum('SIM_GROUP_DEFAULT', 900001),
+    reactMsMin: envNum('SIM_REACT_MS_MIN', 250),
+    reactMsMax: envNum('SIM_REACT_MS_MAX', 1100),
+    segGapMsMin: envNum('SIM_SEG_GAP_MIN_MS', 180),
+    segGapMsMax: envNum('SIM_SEG_GAP_MAX_MS', 650),
+  },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {
     host: process.env.WEBUI_HOST || '0.0.0.0',

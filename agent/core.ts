@@ -30,6 +30,7 @@ export interface InjectedMessage {
   senderNick: string
   text: string
   atBot?: boolean          // 是否 @了 bot（群聊）
+  simulated?: boolean      // WebUI 模拟注入：不写真实群统计
 }
 
 export interface SceneView {
@@ -167,7 +168,7 @@ function needWake(t: SceneType, msg: InjectedMessage): boolean {
 }
 
 export class AgentCore {
-  private pending = new Map<SceneKey, { lines: string[]; targetN?: number; lastMsgAt?: number; woke?: boolean; atBot?: boolean; lastNick?: string; triggerNick?: string }>()
+  private pending = new Map<SceneKey, { lines: string[]; targetN?: number; lastMsgAt?: number; woke?: boolean; atBot?: boolean; lastNick?: string; triggerNick?: string; simulated?: boolean }>()
   private dialogs = new Map<SceneKey, ChatMessage[]>()
   private timers = new Map<SceneKey, { handle: ReturnType<typeof setTimeout>; deadlineAt: number }>()
   private lastReplyAt = 0
@@ -214,8 +215,9 @@ export class AgentCore {
     const line = `${who}: ${text}`
 
     let g = this.pending.get(key)
-    if (!g) { g = { lines: [], targetN: paramFor(t).batchN }; this.pending.set(key, g) }
+    if (!g) { g = { lines: [], targetN: paramFor(t).batchN, simulated: !!msg.simulated }; this.pending.set(key, g) }
     g.lines.push(line)
+    g.simulated = g.simulated || !!msg.simulated
     g.lastNick = who
     if (msg.atBot) g.triggerNick = who
     g.lastMsgAt = Date.now()
@@ -223,7 +225,7 @@ export class AgentCore {
     const need = g.targetN ?? p.batchN
     // 批内只保留最近 need 条，群一直说话也不会无限膨胀
     if (g.lines.length > need) g.lines = g.lines.slice(-need)
-    recordGroupMsg(id)
+    if (!g.simulated) recordGroupMsg(id)
     this.lastActiveAt = Date.now()
 
     const woke = !needWake(t, msg)
@@ -351,7 +353,7 @@ export class AgentCore {
       fillerProb: clamp01(st.fillerProb * mods.filler),
       typoProb: clamp01(st.typoProb * mods.typo),
       echoProb: clamp01(st.echoProb * mods.echo),
-      maxChars: Math.max(20, Math.round(st.maxChars * mods.styleLength)),
+      maxChars: st.maxChars > 0 ? Math.max(20, Math.round(st.maxChars * mods.styleLength)) : 0,
     }
   }
 
@@ -498,7 +500,7 @@ export class AgentCore {
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
       this.persistState(true)
       this.noteReply()
-      recordGroupReply(id)
+      if (!g.simulated) recordGroupReply(id)
       this.emit()
     } catch (err) {
       console.error('[Core] flush 错误:', err)

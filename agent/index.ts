@@ -2,11 +2,14 @@ import { NCWebsocket } from 'node-napcat-ts'
 import { config } from './config.js'
 import { AgentCore, sceneKey, type SceneType } from './core.js'
 import { startWebUI } from './webui.js'
+import { createKernel } from './v2/kernel.js'
+import { QQAdapter } from './v2/channels/qq.js'
 
 const core = new AgentCore()
+const v2 = createKernel()
 
 // ── WebUI（先起，便于连不上 NapCat 时也能进控制台）──
-startWebUI(core)
+startWebUI(core, v2)
 
 // ── NapCat 连接（失败不 crash，WebUI 仍可工作）──
 const bot = new NCWebsocket({
@@ -15,6 +18,7 @@ const bot = new NCWebsocket({
   port: config.napcat.port,
   reconnection: { enable: true, attempts: 10, delay: 3000 },
 })
+v2.attachQQ(new QQAdapter(bot))
 
 try {
   await bot.connect()

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chat-clone · Agent Console</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(148,163,184,.18); border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  .bubble-user { border-radius: 14px 14px 14px 4px; }
+  .bubble-assistant { border-radius: 14px 14px 4px 14px; }
+  .fade-in { animation: fade .25s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .typing-dot { animation: blink 1.2s infinite; }
+  .typing-dot:nth-child(2) { animation-delay: .2s; }
+  .typing-dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+  .thread-active { background: rgba(99,102,241,.14); border-color: rgba(129,140,248,.35); }
+  .tab-active { color: #c7d2fe; border-color: #818cf8; background: rgba(99,102,241,.12); }
+  .pill { font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 999px; }
+  .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body class="bg-[#0b0f17] text-slate-200 overflow-hidden">
+<div class="flex h-full">
+
+  <!-- 左侧：threads -->
+  <aside class="w-72 shrink-0 border-r border-white/5 bg-[#0d1220] flex flex-col">
+    <div class="px-4 pt-4 pb-3 border-b border-white/5">
+      <div class="flex items-center gap-2">
+        <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 grid place-items-center text-sm font-bold">A</div>
+        <div class="min-w-0">
+          <div class="text-sm font-semibold tracking-wide">Agent Console</div>
+          <div class="text-[10px] text-slate-500">sim channel · v2 kernel</div>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <button id="new-group" class="h-8 rounded-lg bg-indigo-500/90 hover:bg-indigo-400 text-white text-xs font-medium">新建模拟群</button>
+        <button id="new-private" class="h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs">模拟私聊</button>
+      </div>
+    </div>
+
+    <div class="px-4 py-2 flex items-center justify-between">
+      <span class="text-[10px] uppercase tracking-widest text-slate-500">Threads</span>
+      <label class="flex items-center gap-1.5 text-[10px] text-slate-500 select-none cursor-pointer">
+        <input id="show-qq" type="checkbox" class="accent-indigo-500"> 显示 QQ 只读
+      </label>
+    </div>
+    <div id="threads" class="flex-1 overflow-y-auto px-2 pb-3 space-y-1"></div>
+
+    <div class="p-3 border-t border-white/5 text-[10px] leading-relaxed text-slate-500">
+      <div class="flex items-center gap-2 text-slate-400"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> 模拟号段 900000–999999</div>
+      <div class="mt-1">真群/真私聊只读，控制台不会向 QQ 发送。</div>
+      <a href="/" class="mt-2 inline-block text-indigo-300 hover:text-indigo-200">← 返回旧控制台</a>
+    </div>
+  </aside>
+
+  <!-- 中间：聊天 -->
+  <main class="flex-1 min-w-0 flex flex-col">
+    <header class="h-16 shrink-0 border-b border-white/5 px-5 flex items-center justify-between bg-[#0b0f17]/80 backdrop-blur">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <h1 id="thread-title" class="text-sm font-semibold truncate">选择一个会话</h1>
+          <span id="thread-badge" class="pill bg-white/5 text-slate-400 border border-white/10 hidden"></span>
+          <span id="thread-paused" class="pill bg-amber-500/15 text-amber-300 border border-amber-500/20 hidden">已暂停</span>
+        </div>
+        <div id="thread-sub" class="text-[11px] text-slate-500 mt-0.5 truncate">模拟通道与真群隔离</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="trigger" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 disabled:opacity-40">触发一轮</button>
+        <button id="pause" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 disabled:opacity-40">暂停</button>
+        <button id="clear" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-red-500/15 border border-white/10 hover:border-red-500/30 text-xs text-slate-300 hover:text-red-300 disabled:opacity-40">清空</button>
+      </div>
+    </header>
+
+    <div class="flex flex-1 min-h-0">
+      <section class="flex-1 min-w-0 flex flex-col">
+        <div id="messages" class="flex-1 overflow-y-auto px-6 py-6"></div>
+        <div id="typing" class="hidden px-6 pb-2 text-[11px] text-indigo-300/80">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 px-3 py-1">
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-300"></span>
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-300"></span>
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-300"></span>
+            <span class="ml-1">正在想…</span>
+          </span>
+        </div>
+        <div class="shrink-0 border-t border-white/5 p-4 bg-[#0d1220]">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-[10px] text-slate-500">发送者</span>
+            <input id="sender" class="h-7 w-28 rounded-md bg-white/5 border border-white/10 px-2 text-[11px] outline-none focus:border-indigo-400/50" value="测试员">
+            <label class="flex items-center gap-1.5 text-[10px] text-slate-500 select-none">
+              <input id="at-bot" type="checkbox" class="accent-indigo-500"> @ 机器人
+            </label>
+            <label class="flex items-center gap-1.5 text-[10px] text-slate-500 select-none">
+              <input id="policy" type="checkbox" class="accent-indigo-500"> 按群策略
+            </label>
+          </div>
+          <div class="flex items-end gap-2">
+            <textarea id="composer" rows="2" class="flex-1 resize-none rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm leading-relaxed outline-none focus:border-indigo-400/50 placeholder:text-slate-600" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+            <button id="send" class="h-10 px-5 rounded-xl bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 text-white text-sm font-medium">发送</button>
+          </div>
+          <div id="composer-hint" class="mt-1 text-[10px] text-slate-600">模拟群消息不会写入 QQ 群统计，也不会通过 NapCat 发送。</div>
+        </div>
+      </section>
+
+      <!-- 右侧 inspector -->
+      <aside class="w-[390px] shrink-0 border-l border-white/5 bg-[#0d1220] flex flex-col">
+        <div class="p-2 border-b border-white/5 flex gap-1">
+          <button data-tab="runs" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">运行</button>
+          <button data-tab="tools" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">工具</button>
+          <button data-tab="events" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">事件</button>
+          <button data-tab="context" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">上下文</button>
+        </div>
+        <div id="inspector" class="flex-1 overflow-y-auto p-3 text-[11px]"></div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script src="/web/console.js"></script>
+</body>
+</html>

@@ -254,7 +254,7 @@ $('chat-scene-pick')?.addEventListener('change', (e) => { chatPickKey = e.target
 
 // ── 聊天页注入（私聊/群聊）──
 function simScene() { return $('sim-scene').value === 'private' ? 'private' : 'group' }
-function simId() { return $('sim-id').value || '10000' }
+function simId() { return $('sim-id').value || '900001' }
 
 $('sim-send').addEventListener('click', async () => {
   const text = $('sim-text').value.trim()

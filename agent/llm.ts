@@ -127,6 +127,15 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
   maxTokens?: number
   temperature?: number
   onAttempt?: (p: ProviderSpec, ok: boolean, err?: string) => void
+  onToolStart?: (info: { name: string; args: Record<string, unknown>; startedAt: number }) => void
+  onTool?: (info: {
+    name: string
+    args: Record<string, unknown>
+    result: string
+    status: 'ok' | 'error'
+    durationMs: number
+    startedAt: number
+  }) => void
 }): Promise<{ text: string; providerId: string; toolCalls: number }> {
   const active = getActiveProvider()
   if (!active) return { text: '', providerId: '', toolCalls: 0 }
@@ -204,12 +213,17 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
           try { args = JSON.parse(c?.function?.arguments || '{}') } catch { /* ignore */ }
           console.log(`[LLM] 工具调用 ${p.id}: ${name}(${JSON.stringify(args)})`)
           const exec = opts.executors[name]
+          const toolStart = Date.now()
+          opts.onToolStart?.({ name, args, startedAt: toolStart })
           let result = '（未知工具）'
+          let status: 'ok' | 'error' = 'ok'
           try {
             result = exec ? String(await exec(args)) : '（未知工具）'
           } catch (e) {
+            status = 'error'
             result = `（工具出错：${(e as Error).message}）`
           }
+          opts.onTool?.({ name, args, result, status, durationMs: Date.now() - toolStart, startedAt: toolStart })
           working.push({ role: 'tool', tool_call_id: c.id, content: result })
         }
         continue

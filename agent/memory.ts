@@ -5,7 +5,6 @@ import { mkdirSync } from 'node:fs'
 import { config } from './config.js'
 import { callLlm } from './llm.js'
 import type { ChatMessage } from './llm.js'
-import type { SceneKey } from './core.js'
 
 const DATA_DIR = join(dirname(fileURLToPath(new URL('.', import.meta.url))), 'data')
 const DB_PATH = join(DATA_DIR, 'memory.db')
@@ -75,7 +74,7 @@ export function splitIntoRounds(msgs: ChatMessage[]): ChatMessage[][] {
 }
 
 // ── 持久化读写 ──
-export function loadDialog(key: SceneKey): { dialog: ChatMessage[]; summary: string } {
+export function loadDialog(key: string): { dialog: ChatMessage[]; summary: string } {
   const db = openDb()
   if (!db) return { dialog: [], summary: '' }
   try {
@@ -90,7 +89,7 @@ export function loadDialog(key: SceneKey): { dialog: ChatMessage[]; summary: str
   }
 }
 
-export function saveDialog(key: SceneKey, dialog: ChatMessage[], summary: string): void {
+export function saveDialog(key: string, dialog: ChatMessage[], summary: string): void {
   const db = openDb()
   if (!db) return
   try {
@@ -107,7 +106,7 @@ export function saveDialog(key: SceneKey, dialog: ChatMessage[], summary: string
   }
 }
 
-export function clearDialogDb(key: SceneKey): void {
+export function clearDialogDb(key: string): void {
   const db = openDb()
   if (!db) return
   try {
