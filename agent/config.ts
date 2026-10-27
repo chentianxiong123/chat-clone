@@ -253,10 +253,12 @@ export const config = {
     },
     // ── F. 近期状态 —— 此刻累不累/烦不烦/想不想聊（全局，单群场景）──
     // 数值 0~1；事件更新 + 指数衰减回基线；影响回复概率/延迟/风格/主动，并注入提示词
+    // 注意：此系统会注入"累就短/烦就敷衍/不想聊就嗯哦"等状态诱导，可能让模型整体变敷衍/发癫。
+    // 默认关闭（2026-10-27 群反馈"一直困死了/睡了/别烦我"即此系统诱发）。
     recentState: {
-      enabled: process.env.HL_STATE_MODEL !== 'false',
+      enabled: process.env.HL_STATE_MODEL === 'true',
       // 是否把紧凑状态行注入 LLM（放对话尾部，不破坏 system 前缀缓存）
-      injectPrompt: process.env.HL_STATE_INJECT !== 'false',
+      injectPrompt: process.env.HL_STATE_INJECT === 'true',
       promptMaxChars: envNum('HL_STATE_PROMPT_MAX_CHARS', 260),
       // 随机扰动（心情/精力每次事件轻微漂移，避免死板）
       noise: envNum('HL_STATE_NOISE', 0.02),

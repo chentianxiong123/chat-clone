@@ -22,15 +22,15 @@ const PRESET_DEFAULTS: Record<string, string> = {
   BATCH_T: '60000',
   HL_IGNORE_SHORT_MIN_CHARS: '0',
   HL_IGNORE_SHORT_PROB: '0',
-  HL_STATE_MODEL: 'true',
-  HL_STATE_INJECT: 'true',
+  HL_STATE_MODEL: 'false',
+  HL_STATE_INJECT: 'false',
 }
 
 const ENV_PRESETS: Array<{ name: string; label: string; description: string; patch: Record<string, string> }> = [
   {
     name: 'default',
     label: '默认（推荐）',
-    description: '自动接话、不主动冒泡、近期状态开启',
+    description: '自动接话、不主动冒泡（近期状态系统已默认关闭）',
     patch: PRESET_DEFAULTS,
   },
   {
