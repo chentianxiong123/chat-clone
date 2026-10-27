@@ -299,6 +299,8 @@ export const config = {
         typo: envNum('HL_STATE_W_TYPO', 1),
         echo: envNum('HL_STATE_W_ECHO', 1),
         proactive: envNum('HL_STATE_W_PROACTIVE', 1),
+        cooldown: envNum('HL_STATE_W_COOLDOWN', 1),
+        segments: envNum('HL_STATE_W_SEGMENTS', 1),
       },
     },
   },

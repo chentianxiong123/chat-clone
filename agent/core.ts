@@ -376,8 +376,8 @@ export class AgentCore {
       this.dialogs.set(key, updated)
       this.persist(key)
 
-      // 发消息一定要慢：距上一条回复至少 cooldown（带随机抖动）；刷屏太密再叠加额外冷却
-      const baseCd = jitter(p.cooldown, config.humanlike.cooldown.jitter)
+      // 发消息一定要慢：距上一条回复至少 cooldown（带随机抖动×状态冷却乘数）；刷屏太密再叠加额外冷却
+      const baseCd = jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown
       const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply)
@@ -445,9 +445,9 @@ export class AgentCore {
       const raw = await callLlm(messages)
       if (!raw) return
       const reply = applyStyle(raw, lastMsg, this.styleBias(mods))
-      const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) - Date.now(), this.burstWaitMs())
+      const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
-      await this.sendReplySegmented(t, id, reply)
+      await this.sendReplySegmented(t, id, reply, mods.segments)
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
@@ -507,7 +507,7 @@ export class AgentCore {
   }
 
   /** 回车分割发送：回复按换行拆成多条，逐条带随机间隔发出（模拟真人打字） */
-  private async sendReplySegmented(t: SceneType, id: number, reply: string): Promise<void> {
+  private async sendReplySegmented(t: SceneType, id: number, reply: string, segMod = 1): Promise<void> {
     const ty = config.humanlike.typing
     // 即使没有出站通道（如模拟注入）也打印分段，便于控制台观察节奏
     const logSeg = (i: number, seg: string): void => {
@@ -519,12 +519,14 @@ export class AgentCore {
       return
     }
     // 拆条 + 超长单条再拆 + 限制最多拆几条（超出部分合并到末尾，避免狂刷几十条）
+    // segMod：状态驱动的分段条数乘数（兴致高多拆几句，烦躁少发）
     let segments = reply.split('\n').map(s => s.trimEnd())
     const maxSegChars = config.humanlike.style.maxSegmentChars
     if (maxSegChars > 0) segments = segments.flatMap(s => splitLongSegment(s, maxSegChars))
-    if (ty.maxSegments > 0 && segments.length > ty.maxSegments) {
-      const head = segments.slice(0, ty.maxSegments - 1)
-      const tail = segments.slice(ty.maxSegments - 1).filter(s => s.trim() !== '')
+    const maxSeg = ty.maxSegments > 0 ? Math.max(1, Math.round(ty.maxSegments * segMod)) : 0
+    if (maxSeg > 0 && segments.length > maxSeg) {
+      const head = segments.slice(0, maxSeg - 1)
+      const tail = segments.slice(maxSeg - 1).filter(s => s.trim() !== '')
       segments = [...head, tail.join('\n')]
     }
     let i = 0

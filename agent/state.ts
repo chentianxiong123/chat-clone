@@ -47,6 +47,10 @@ export interface StateModifiers {
   typo: number
   echo: number
   proactive: number   // 主动说话概率 0~1
+  cooldown: number    // 冷却乘数（烦躁/忙更久，兴致高更短）
+  segments: number    // 分段条数乘数（兴致高说更多段，烦躁就 1-2 段）
+  followUp: number    // 追问倾向 0~1（感兴趣时顺嘴追问一句）
+  deflect: number     // 岔开话题倾向 0~1（不感兴趣就敷衍岔开）
 }
 
 export interface RecentStateView extends RecentState {
@@ -292,7 +296,7 @@ export function stateLabels(state: RecentState): StateLabels {
 export function computeModifiers(state: RecentState): StateModifiers {
   const rs = config.humanlike.recentState
   if (!rs.enabled) {
-    return { replyProb: 1, reactDelay: 1, styleLength: 1, emoji: 1, filler: 1, typo: 1, echo: 1, proactive: 1 }
+    return { replyProb: 1, reactDelay: 1, styleLength: 1, emoji: 1, filler: 1, typo: 1, echo: 1, proactive: 1, cooldown: 1, segments: 1, followUp: 0.5, deflect: 0.5 }
   }
   const { energy: e, mood: m, patience: pat, social: soc, busy, irritation: irr, interest: int } = state
   const w = rs.weights
@@ -312,6 +316,11 @@ export function computeModifiers(state: RecentState): StateModifiers {
   const rawTypo = 1 + 0.5 * (eBase - e) + 0.2 * (busy - bBase)
   const rawEcho = 1 + 0.6 * (m - base.mood) + 0.3 * (int - 0.5) - 0.3 * irr
   const rawProactive = e * soc * (1 - busy) * (0.4 + 0.6 * m) * (1 - irr)
+  // 新增动态表现维度：烦躁/忙 → 冷却更久、段数更少；兴致/心情好 → 更容易追问、更少岔开
+  const rawCooldown = 1 + 0.6 * (bBase - busy) + 0.5 * irr - 0.3 * moodBias
+  const rawSegments = 1 + 0.4 * (e - eBase) + 0.3 * moodBias + 0.3 * (int - 0.5) - 0.4 * irr
+  const followUpP = 0.25 + 0.45 * int + 0.2 * (m - base.mood) - 0.15 * irr
+  const deflectP = 0.6 - 0.45 * int + 0.2 * irr - 0.15 * (m - base.mood)
 
   const apply = (raw: number, weight: number, lo: number, hi: number): number =>
     clamp(1 + (raw - 1) * weight, lo, hi)
@@ -325,6 +334,10 @@ export function computeModifiers(state: RecentState): StateModifiers {
     typo: rs.effects.style ? apply(rawTypo, w.typo, 0.5, 1.5) : 1,
     echo: rs.effects.style ? apply(rawEcho, w.echo, 0.3, 1.5) : 1,
     proactive: rs.effects.proactive ? clamp01(rawProactive * w.proactive) : 1,
+    cooldown: rs.effects.react ? apply(rawCooldown, w.cooldown, 0.6, 1.7) : 1,
+    segments: rs.effects.style ? apply(rawSegments, w.segments, 0.6, 1.4) : 1,
+    followUp: rs.effects.style ? clamp01(followUpP) : 0.5,
+    deflect: rs.effects.style ? clamp01(deflectP) : 0.5,
   }
 }
 
@@ -355,6 +368,11 @@ export function buildStatePrompt(state: RecentState, now = Date.now()): string {
   if (state.social < 0.35) hints.push('不想聊就嗯哦')
   if (state.mood > 0.7) hints.push('心情好可以多聊两句')
   if (state.interest > 0.7) hints.push('这个话题有兴趣就接')
+  // 动态表现：追问 / 岔开（按当前状态概率性给倾向，增加"活人感"）
+  const followUpP = 0.25 + 0.45 * state.interest + 0.2 * (state.mood - 0.55) - 0.15 * state.irritation
+  const deflectP = 0.6 - 0.45 * state.interest + 0.2 * state.irritation - 0.15 * (state.mood - 0.55)
+  if (followUpP > 0.6) hints.push('有点感兴趣，可顺嘴追问对方一句')
+  if (deflectP > 0.55) hints.push('这个话题没啥兴趣，可敷衍或岔开')
   if (!hints.length) hints.push('正常聊')
   const text =
     `【你此刻的状态】精力${Math.round(state.energy * 100)}%（${labels.energy}） ` +
