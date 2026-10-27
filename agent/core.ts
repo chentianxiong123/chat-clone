@@ -3,6 +3,8 @@ import { callLlm, callLlmWithTools, type ChatMessage } from './llm.js'
 import { buildSystemPrompt, buildMemoryHintMessage } from './prompt.js'
 import { MEMORY_TOOLS, createMemoryExecutors, needsRecall, searchMemoryNote } from './tools.js'
 import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from './antirepeat.js'
+import { relevanceScore } from './dynamics.js'
+import { limitProfanity } from './profanity.js'
 import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
@@ -67,6 +69,8 @@ const chance = (p: number): boolean => Math.random() < p
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
 /** 给一个基准时长加上 ±ratio 的随机抖动，破坏固定节奏 */
 const jitter = (base: number, ratio: number): number => Math.round(base * (1 + (Math.random() * 2 - 1) * ratio))
+/** 距某时间戳过去了多久（未设置按 0 算） */
+const lastElapsed = (ts?: number): number => (ts ? Date.now() - ts : 0)
 
 export const sceneKey = (t: SceneType, id: number): SceneKey => `${t === 'private' ? 'p' : 'g'}:${id}`
 
@@ -282,8 +286,15 @@ export class AgentCore {
     this.emit()
   }
 
-  /** 综合对话状态 / 分时段 / 连发长度 / 唤醒 计算本轮回复概率 */
-  private effectiveReplyProb(key: SceneKey, t: SceneType, batchSize: number, woke: boolean): number {
+  /** 综合对话状态 / 分时段 / 连发长度 / 上一条相关度 / 唤醒 计算本轮回复概率 */
+  private effectiveReplyProb(
+    key: SceneKey,
+    t: SceneType,
+    batchSize: number,
+    woke: boolean,
+    ctx: string,
+    prevTexts: string[],
+  ): number {
     const rp = config.humanlike.replyProb
     const base = t === 'private' ? rp.private : rp.group
     let p = base
@@ -293,6 +304,18 @@ export class AgentCore {
       // 进程刚启动视为"刚说过话"，避免一上来就冷场；之后按真实静默时长衰减
       const elapsed = last ? Date.now() - last : 0
       p = stateReplyProb(elapsed, base)
+    }
+    // 动态概率（群聊）：新消息和最近几条越相关越可能接话，突然岔开越可能略过
+    const dyn = rp.dynamic
+    if (dyn.enabled && t === 'group' && prevTexts.length) {
+      const rel = Math.max(...prevTexts.map(x => relevanceScore(ctx, x)))
+      const span = rel >= dyn.threshold
+        ? dyn.boost * (rel - dyn.threshold) / Math.max(1e-6, 1 - dyn.threshold)
+        : -dyn.drop * (dyn.threshold - rel) / Math.max(1e-6, dyn.threshold)
+      p = Math.max(0, Math.min(1, dyn.base + span))
+      // 仍保留"越久没说话越可能不回"的轻量衰减（active=1 / semi=0.9 / cold=0.85…）
+      if (st.enabled) p *= stateReplyProb(lastElapsed(this.lastSelfAt.get(key)), 1)
+      console.log(`[Core] ${key} 动态回复概率 rel=${rel.toFixed(2)} → ${p.toFixed(2)}`)
     }
     if (t === 'group' && rp.hourly.length === 24) {
       p *= rp.hourly[new Date().getHours()]
@@ -368,8 +391,12 @@ export class AgentCore {
     console.log(`[Core] 触发 ${key}: 共 ${g.lines.length} 条（触发者=${triggerNick || '无'}）`)
 
     try {
-      // 回复概率：对话状态 + 分时段 + 连发长度（模拟真人；被点名必回）
-      const prob = this.effectiveReplyProb(key, t, g.lines.length, !!g.woke)
+      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
+      // 上一条（可配多条）作为"是否接着聊"的参照
+      const prevMsgs = hist.slice(-config.humanlike.replyProb.dynamic.contextMsgs)
+      const prevTexts = prevMsgs.map(m => m.content)
+      // 回复概率：动态相关度 + 对话状态 + 分时段 + 连发长度（模拟真人；被点名必回）
+      const prob = this.effectiveReplyProb(key, t, g.lines.length, !!g.woke, ctx, prevTexts)
       if (prob < 1 && Math.random() > prob) {
         console.log(`[Core] ${key} 概率沉默（replyProb=${prob.toFixed(2)}）`)
         this.emit()
@@ -379,7 +406,6 @@ export class AgentCore {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
 
-      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       // 反模板：最近自己回复里的过热词提醒（动态提示，放在历史之后，不破坏长前缀缓存）
       const ar = config.humanlike.antiRepeat
       const recent = this.recentReplies.get(key) ?? []
@@ -427,7 +453,16 @@ export class AgentCore {
         return
       }
       // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
-      const reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
+      let reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
+      // 重级脏话硬拦截（侮辱家人/极端攻击），轻中级别不压
+      const pf = config.humanlike.profanity
+      if (pf.hardBlock) {
+        const cleaned = limitProfanity(reply, pf.replace)
+        if (cleaned !== reply) {
+          console.log('[Core] 重级脏话拦截')
+          reply = cleaned
+        }
+      }
       // 近重复跳过：与近期回复过于相似就别复读了（也顺带降低刷屏）
       if (ar.enabled && tooSimilar(reply, recent, ar.dropSim)) {
         console.log(`[Core] ${key} 回复与近期过于相似，跳过`)
@@ -538,7 +573,15 @@ export class AgentCore {
           })).text
         : await callLlm(messages)
       if (!raw) return
-      const reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))
+      let reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))
+      const pf = config.humanlike.profanity
+      if (pf.hardBlock) {
+        const cleaned = limitProfanity(reply, pf.replace)
+        if (cleaned !== reply) {
+          console.log('[Core] 重级脏话拦截')
+          reply = cleaned
+        }
+      }
       const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, reply, mods.segments)

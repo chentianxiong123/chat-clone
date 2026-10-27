@@ -190,6 +190,20 @@ export const config = {
         threshold: envNum('HL_BATCH_PENALTY_FROM', 10),
         factor: clamp01(envNum('HL_BATCH_PENALTY_FACTOR', 0.85)),
       },
+      // 动态回复概率：看新消息和上一条的相关度——接着聊就更可能回，突然岔开就更可能略过
+      dynamic: {
+        enabled: process.env.HL_REPLY_DYNAMIC !== 'false',
+        base: clamp01(envNum('HL_REPLY_DYNAMIC_BASE', 0.75)),
+        boost: clamp01(envNum('HL_REPLY_DYNAMIC_BOOST', 0.2)),
+        drop: clamp01(envNum('HL_REPLY_DYNAMIC_DROP', 0.3)),
+        threshold: clamp01(envNum('HL_REPLY_DYNAMIC_THRESHOLD', 0.3)),
+        contextMsgs: Math.max(1, Math.round(envNum('HL_REPLY_DYNAMIC_CONTEXT_MSGS', 3))),
+      },
+    },
+    // 重级脏话硬拦截（侮辱家人/极端攻击）；按用户要求先不压密度，只拦最过分的
+    profanity: {
+      hardBlock: process.env.HL_PROFANITY_HARD_BLOCK !== 'false',
+      replace: process.env.HL_PROFANITY_REPLACE || '真服了',
     },
     // 太短的敷衍消息直接忽略（如"好的""嗯"），真人常当没看见
     ignoreShort: {
