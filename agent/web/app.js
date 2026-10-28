@@ -298,64 +298,49 @@ function renderRagForm(cfg) {
   const labelOf = { vec: '向量', fts: '全文', like: '关键词' }
   const el = $('rag-orchestrate')
   if (!el) return
+
+  // 统一气泡：标签 / 控件(flex-1 垂直居中) / 提示(贴底)，整行等高
+  const cell = (label, control, hint = '', cls = '') => `
+    <div class="glass rounded-xl p-3 flex flex-col h-full min-h-[108px] ${cls}">
+      <div class="rag-form-label">${label}</div>
+      <div class="flex-1 flex items-center min-h-[30px]">${control}</div>
+      ${hint ? `<div class="rag-form-hint">${hint}</div>` : `<div class="rag-form-hint placeholder">&nbsp;</div>`}
+    </div>`
+  const chip = (cls, attrs, text, on, wide = false) =>
+    `<button type="button" class="rag-chip ${cls} ${on ? 'active' : ''} ${wide ? 'w-full' : ''}" ${attrs}>${text}</button>`
+  const vp = Math.round((cfg.vecProb || 0) * 100)
+  const rp = Math.round((cfg.recallProb || 0) * 100)
+
   el.innerHTML = `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">注入方式</div>
-        <div class="flex gap-2">
-          <button type="button" class="rag-chip mode-btn ${cfg.toolsEnabled ? '' : 'active'}" data-mode="false">每轮固定</button>
-          <button type="button" class="rag-chip mode-btn ${cfg.toolsEnabled ? 'active' : ''}" data-mode="true">工具按需</button>
-        </div>
-        <div class="rag-form-hint">固定=每轮都注入；工具=模型自己决定是否回忆</div>
-      </div>
-      ${['vec', 'fts', 'like'].map(ch => `
-        <div class="glass p-3 round-xl">
-          <div class="rag-form-label">${labelOf[ch]}通道</div>
-          <button type="button" class="rag-chip strat-btn ${strat.includes(ch) ? 'active' : ''}" data-ch="${ch}" style="width:100%">${strat.includes(ch) ? '开' : '关'}</button>
-        </div>`).join('')}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      ${cell('注入方式', `
+        <div class="grid grid-cols-2 gap-2 w-full">
+          ${chip('mode-btn', 'data-mode="false"', '每轮固定', !cfg.toolsEnabled)}
+          ${chip('mode-btn', 'data-mode="true"', '工具按需', !!cfg.toolsEnabled)}
+        </div>`, '固定=每轮都注入；工具=模型自己决定是否回忆')}
+      ${['vec', 'fts', 'like'].map(ch => cell(`${labelOf[ch]}通道`,
+        chip('strat-btn', `data-ch="${ch}"`, strat.includes(ch) ? '开' : '关', strat.includes(ch), true),
+        ch === 'vec' ? '向量语义相似' : ch === 'fts' ? '全文 BM25' : '关键词 LIKE 兜底',
+      )).join('')}
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-      <div class="glass p-3 round-xl">
-        <div class="flex items-center justify-between mb-1">
-          <span class="rag-form-label">向量升级概率</span>
-          <span class="font-mono text-slate-300" id="rag-vp-v">${Math.round((cfg.vecProb || 0) * 100)}%</span>
-        </div>
-        <input type="range" id="rag-vp" class="w-full accent-indigo-500" min="0" max="100" step="5" value="${Math.round((cfg.vecProb || 0) * 100)}">
-        <div class="rag-form-hint">本地有命中时，以该概率额外升级向量（0=只用本地省钱）</div>
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">本地空时强制向量</div>
-        <label class="flex items-center gap-2 text-[11px] text-slate-300 select-none">
-          <input type="checkbox" id="rag-fallback" class="accent-indigo-500" ${cfg.vecFallbackOnEmpty ? 'checked' : ''}> 无命中就向量兜底
-        </label>
-        <div class="rag-form-hint">保证每轮都有人格参考</div>
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">每路命中 topK</div>
-        <input type="number" id="rag-topk" class="rag-num" min="1" max="50" value="${cfg.topK ?? 3}">
-        <div class="rag-form-hint">每个通道最多取几条</div>
-      </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+      ${cell('向量升级概率', `
+        <div class="flex items-center gap-2 w-full">
+          <input type="range" id="rag-vp" class="flex-1 accent-indigo-500" min="0" max="100" step="5" value="${vp}">
+          <span class="font-mono text-xs text-slate-300 w-9 text-right shrink-0" id="rag-vp-v">${vp}%</span>
+        </div>`, '本地有命中时，以该概率额外升级向量（0=只用本地）', 'lg:col-span-2')}
+      ${cell('本地空时强制向量', chip('fb-btn', '', cfg.vecFallbackOnEmpty ? '开' : '关', !!cfg.vecFallbackOnEmpty, true), '本地无命中就向量兜底')}
+      ${cell('每路命中 topK', `<input type="number" id="rag-topk" class="rag-num" min="1" max="50" value="${cfg.topK ?? 3}">`, '每个通道最多取几条')}
     </div>
-    <div id="rag-toolbox" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 ${cfg.toolsEnabled ? '' : 'hidden'}">
-      <div class="glass p-3 round-xl">
-        <div class="flex items-center justify-between mb-1">
-          <span class="rag-form-label">主动回忆概率</span>
-          <span class="font-mono text-slate-300" id="rag-rp-v">${Math.round((cfg.recallProb || 0) * 100)}%</span>
-        </div>
-        <input type="range" id="rag-rp" class="w-full accent-indigo-500" min="0" max="100" step="5" value="${Math.round((cfg.recallProb || 0) * 100)}">
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">工具循环上限</div>
-        <input type="number" id="rag-maxiter" class="rag-num" min="1" max="10" value="${cfg.toolMaxIter ?? 2}">
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">每次注入条数</div>
-        <input type="number" id="rag-maxitems" class="rag-num" min="1" max="10" value="${cfg.toolMaxItems ?? 1}">
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="rag-form-label">单条记忆上限</div>
-        <input type="number" id="rag-fact" class="rag-num" min="10" max="500" step="10" value="${cfg.factMaxChars ?? 60}">
-      </div>
+    <div id="rag-toolbox" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3 ${cfg.toolsEnabled ? '' : 'hidden'}">
+      ${cell('主动回忆概率', `
+        <div class="flex items-center gap-2 w-full">
+          <input type="range" id="rag-rp" class="flex-1 accent-indigo-500" min="0" max="100" step="5" value="${rp}">
+          <span class="font-mono text-xs text-slate-300 w-9 text-right shrink-0" id="rag-rp-v">${rp}%</span>
+        </div>`, '工具发起回忆的触发概率')}
+      ${cell('工具循环上限', `<input type="number" id="rag-maxiter" class="rag-num" min="1" max="10" value="${cfg.toolMaxIter ?? 2}">`, '单轮最多反复回忆几次')}
+      ${cell('每次注入条数', `<input type="number" id="rag-maxitems" class="rag-num" min="1" max="10" value="${cfg.toolMaxItems ?? 1}">`, '每次工具调用取几条')}
+      ${cell('单条记忆上限', `<input type="number" id="rag-fact" class="rag-num" min="10" max="500" step="10" value="${cfg.factMaxChars ?? 60}">`, '单条记忆最多多少字')}
     </div>`
 
   el.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => {
@@ -368,6 +353,12 @@ function renderRagForm(cfg) {
     b.classList.toggle('active', on)
     b.textContent = on ? '开' : '关'
   }))
+  const fb = el.querySelector('.fb-btn')
+  if (fb) fb.addEventListener('click', () => {
+    const on = !fb.classList.contains('active')
+    fb.classList.toggle('active', on)
+    fb.textContent = on ? '开' : '关'
+  })
   $('rag-vp').addEventListener('input', () => { $('rag-vp-v').textContent = $('rag-vp').value + '%' })
   $('rag-rp').addEventListener('input', () => { $('rag-rp-v').textContent = $('rag-rp').value + '%' })
 }
@@ -381,7 +372,7 @@ async function saveRagConfig() {
     strategy: strat,
     toolsEnabled: modeBtn ? modeBtn.dataset.mode === 'true' : false,
     vecProb: Number($('rag-vp').value) / 100,
-    vecFallbackOnEmpty: $('rag-fallback').checked,
+    vecFallbackOnEmpty: !!el.querySelector('.fb-btn') && el.querySelector('.fb-btn').classList.contains('active'),
     topK: Number($('rag-topk').value),
     recallProb: Number($('rag-rp').value) / 100,
     toolMaxIter: Number($('rag-maxiter').value),

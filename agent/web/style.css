@@ -97,6 +97,40 @@ body {
 .stat-value { font-size: 1.9rem; font-weight: 700; font-family: ui-monospace, monospace; }
 .stat-note { font-size: .72rem; color: #94a3b8; margin-top: 4px; line-height: 1.5; }
 
+/* ── RAG 记忆库：检索编排 ──
+   颜色分层：标签=灰（非按钮）· 按钮=描边 chip（active=靛蓝）· 提示=暗灰小字 · 数字输入=描边输入框 */
+.rag-form-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: #7c8aa0; margin-bottom: 8px; }
+.rag-form-hint { font-size: .64rem; color: #4b5563; margin-top: 7px; line-height: 1.5; }
+.rag-chip {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: #94a3b8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: .7rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.rag-chip:hover { color: #e2e8f0; border-color: rgba(255, 255, 255, .28); }
+.rag-chip.active {
+  background: rgba(129, 140, 248, .2);
+  border-color: rgba(129, 140, 248, .55);
+  color: #c7d2fe;
+  font-weight: 600;
+}
+.rag-num {
+  width: 100%;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: .78rem;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+.rag-num:focus { border-color: rgba(129, 140, 248, .55); }
+
 /* ── 时间范围切换（AstrBot 式 chips）── */
 .range-switch { display: flex; gap: 4px; background: var(--glass); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
 .range-chip { background: transparent; border: none; color: #94a3b8; font-size: .75rem; padding: 4px 14px; border-radius: 999px; cursor: pointer; transition: all .15s; }
