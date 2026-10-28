@@ -291,7 +291,19 @@ export async function healthCheckAll(): Promise<ProviderHealth[]> {
 
 /** 文本向量化（RAG 检索用），返回 1024 维向量 */
 export async function embed(text: string): Promise<Float32Array | null> {
-  // 优先走 provider 体系（providers.json 配 embedModel 的上游），读标准 OpenAI usage
+  // 嵌入只按次计数（不报 token）：成功记录 ok=1 + 按次费用，失败记录 fail=1；token 字段恒 0
+  const rec = (ok: number, cost = 0, sub?: string) => recordUsage({
+    kind: 'embed',
+    sub: sub || (getEmbedProvider()?.id ? `${getEmbedProvider()!.id}/${getEmbedProvider()!.embedModel}` : config.rag.embedModel),
+    ok,
+    fail: ok ? 0 : 1,
+    cost,
+    tokensIn: 0,
+    tokensOut: 0,
+    ts: Date.now(),
+  })
+
+  // 优先走 provider 体系（providers.json 配 embedModel 的上游）
   const embedProvider = getEmbedProvider()
   if (embedProvider && config.rag.embedEnabled) {
     try {
@@ -303,28 +315,17 @@ export async function embed(text: string): Promise<Float32Array | null> {
       const arr = resp.data?.[0]?.embedding
       if (!arr) {
         console.warn('[Embed] 响应缺 data[0].embedding')
-        recordUsage({ kind: 'embed', sub: `${embedProvider.id}/${embedProvider.embedModel}`, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+        rec(0, 0, `${embedProvider.id}/${embedProvider.embedModel}`)
         return null
       }
-      const usage = resp.usage
-      const tokensIn = usage?.prompt_tokens ?? 0
       const cost = (!priceFor(embedProvider).in && !priceFor(embedProvider).out)
         ? (config.embed.pricePerCall || 0)
-        : (tokensIn / 1_000_000) * priceFor(embedProvider).in
-      recordUsage({
-        kind: 'embed',
-        sub: `${embedProvider.id}/${embedProvider.embedModel}`,
-        ok: 1,
-        fail: 0,
-        cost,
-        tokensIn,
-        tokensOut: usage?.completion_tokens ?? 0,
-        ts: Date.now(),
-      })
+        : 0 // 按次计：token 不报，费用统一用 pricePerCall
+      rec(1, cost, `${embedProvider.id}/${embedProvider.embedModel}`)
       return new Float32Array(arr)
     } catch (e) {
       console.warn('[Embed] provider 请求失败:', (e as Error).message)
-      recordUsage({ kind: 'embed', sub: `${embedProvider.id}/${embedProvider.embedModel}`, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+      rec(0, 0, `${embedProvider.id}/${embedProvider.embedModel}`)
       return null
     }
   }
@@ -343,30 +344,21 @@ export async function embed(text: string): Promise<Float32Array | null> {
     })
     if (!res.ok) {
       console.warn(`[Embed] HTTP ${res.status}: ${await res.text()}`)
-      recordUsage({ kind: 'embed', sub: config.rag.embedModel, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+      rec(0, 0, config.rag.embedModel)
       return null
     }
-    const data = await res.json() as { data?: Array<{ embedding?: number[] }>; usage?: { prompt_tokens?: number; total_tokens?: number } }
+    const data = await res.json() as { data?: Array<{ embedding?: number[] }> }
     const arr = data?.data?.[0]?.embedding
     if (!Array.isArray(arr)) {
       console.warn('[Embed] 响应缺 data[0].embedding')
-      recordUsage({ kind: 'embed', sub: config.rag.embedModel, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+      rec(0, 0, config.rag.embedModel)
       return null
     }
-    recordUsage({
-      kind: 'embed',
-      sub: config.rag.embedModel,
-      ok: 1,
-      fail: 0,
-      cost: config.embed.pricePerCall,
-      tokensIn: data?.usage?.prompt_tokens ?? 0,
-      tokensOut: 0,
-      ts: Date.now(),
-    })
+    rec(1, config.embed.pricePerCall, config.rag.embedModel)
     return new Float32Array(arr)
   } catch (e) {
     console.warn('[Embed] 请求失败:', (e as Error).message)
-    recordUsage({ kind: 'embed', sub: config.rag.embedModel, ok: 0, fail: 1, cost: 0, tokensIn: 0, tokensOut: 0, ts: Date.now() })
+    rec(0, 0, config.rag.embedModel)
     return null
   }
 }
