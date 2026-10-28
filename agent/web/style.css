@@ -120,10 +120,12 @@ table.table td { color: #cbd5e1; }
 #page-chat { max-width: none; padding: 0; height: calc(100vh - 57px); }
 #page-chat.active { display: block; }
 .v2-chat { height: 100%; overflow: hidden; }
+:where(#page-chat) button { all: revert-layer; cursor: pointer; }
+:where(#page-chat) input:not([type="checkbox"]), :where(#page-chat) textarea { all: revert-layer; }
 .v2-chat .v2-threads { width: 260px; }
 .v2-chat .v2-inspector { width: 360px; }
-.bubble-user { border-radius: 14px 14px 14px 4px; }
-.bubble-assistant { border-radius: 14px 14px 4px 14px; }
+.bubble-user { border-radius: 14px 14px 4px 14px; }
+.bubble-assistant { border-radius: 14px 14px 14px 4px; }
 .typing-dot { animation: blink 1.2s infinite; }
 .typing-dot:nth-child(2) { animation-delay: .2s; }
 .typing-dot:nth-child(3) { animation-delay: .4s; }

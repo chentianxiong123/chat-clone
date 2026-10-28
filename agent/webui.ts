@@ -498,7 +498,11 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           '.png': 'image/png',
           '.woff2': 'font/woff2',
         }
-        res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' })
+        const noCache = ['.html', '.js', '.css'].includes(ext)
+        res.writeHead(200, {
+          'Content-Type': types[ext] || 'application/octet-stream',
+          ...(noCache ? { 'Cache-Control': 'no-cache' } : {}),
+        })
         res.end(readFileSync(filePath))
         return
       }

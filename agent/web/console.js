@@ -24,8 +24,8 @@ const fmtTime = (t) => {
 }
 const fmtDur = (ms) => {
   if (ms === undefined || ms === null) return ''
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  if (ms < 1000) return `${Math.round(ms)} 毫秒`
+  return `${(ms / 1000).toFixed(1)} 秒`
 }
 const short = (s, n = 80) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()
@@ -69,8 +69,7 @@ async function loadThreads() {
 }
 
 function threadBadge(t) {
-  if (t.channel === 'sim') return t.kind === 'group' ? '模拟群' : '模拟私聊'
-  return t.kind === 'group' ? 'QQ群 · 只读' : 'QQ私聊 · 只读'
+  return t.channel === 'sim' ? '' : '只读'
 }
 
 function renderThreads() {
@@ -78,7 +77,7 @@ function renderThreads() {
   box.innerHTML = ''
   const visible = S.showQQ ? S.threads : S.threads.filter(t => t.channel === 'sim')
   if (!visible.length) {
-    box.innerHTML = `<div class="p-3 text-[11px] text-slate-600">${S.threads.length ? '没有模拟会话，点上面新建一个模拟群。' : '还没有会话，点上面新建一个模拟群。'}</div>`
+    box.innerHTML = `<div class="p-3 text-[11px] text-slate-600">还没有会话，点上方新建。</div>`
     return
   }
   for (const t of visible) {
@@ -88,7 +87,7 @@ function renderThreads() {
     const sim = t.channel === 'sim'
     btn.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold ${sim ? 'bg-indigo-500/20 text-indigo-200' : 'bg-white/5 text-slate-400'}">${sim ? (t.kind === 'group' ? 'S' : 'P') : (t.kind === 'group' ? 'Q' : 'Q')}</span>
+        <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold ${sim ? 'bg-indigo-500/20 text-indigo-200' : 'bg-white/5 text-slate-400'}">${t.kind === 'group' ? '群' : '私'}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-1.5">
             <span class="text-[12px] font-medium truncate ${sim ? 'text-slate-200' : 'text-slate-400'}">${esc(t.title)}</span>
@@ -142,18 +141,17 @@ function renderHeader() {
     title.textContent = '选择一个会话'
     badge.classList.add('hidden')
     paused.classList.add('hidden')
-    sub.textContent = '模拟通道与真群隔离'
+    sub.textContent = ''
     for (const b of [trigger, pause, clear, send, composer, sender, atBot, policy]) b.disabled = true
     return
   }
   title.textContent = t.title
-  badge.textContent = threadBadge(t)
-  badge.className = `pill border ${t.channel === 'sim' ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' : 'bg-white/5 text-slate-400 border-white/10'}`
-  badge.classList.remove('hidden')
+  const badgeText = threadBadge(t)
+  badge.textContent = badgeText
+  badge.className = 'pill bg-white/5 text-slate-400 border border-white/10'
+  badge.classList.toggle('hidden', !badgeText)
   paused.classList.toggle('hidden', !t.paused)
-  sub.textContent = t.channel === 'sim'
-    ? `${t.id} · 模拟通道（不会发到 QQ）`
-    : `${t.id} · QQ 通道只读（控制台不发送）`
+  sub.textContent = ''
   const sim = t.channel === 'sim'
   for (const b of [trigger, pause, clear, send, composer, sender, atBot, policy]) b.disabled = !sim
   pause.textContent = t.paused ? '恢复' : '暂停'
@@ -166,11 +164,14 @@ function updateHint() {
   const sim = t.channel === 'sim'
   const policy = $('policy')?.checked
   const b = S.snapshot?.batch
-  $('composer-hint').textContent = !sim
-    ? '这是 QQ 真实会话，控制台只读；请在 QQ 侧操作。'
-    : policy
-      ? `按群策略：攒够 ${b ? `${b.nMin}~${b.nMax}` : 'N'} 条且静默 ${b ? Math.round(b.t / 1000) : 'T'} 秒后触发；点「触发一轮」可强制。`
-      : '模拟群消息不会写入 QQ 群统计，也不会通过 NapCat 发送。'
+  const hint = $('composer-hint')
+  if (!sim || !policy) {
+    hint.textContent = ''
+    hint.classList.add('hidden')
+    return
+  }
+  hint.textContent = `攒够 ${b ? `${b.nMin}~${b.nMax}` : 'N'} 条 / 静默 ${b ? Math.round(b.t / 1000) : 'T'} 秒触发`
+  hint.classList.remove('hidden')
 }
 
 function cleanUserContent(content) {
@@ -192,7 +193,7 @@ function renderMessages() {
   const dialog = S.detail?.dialog || []
   if (!dialog.length) {
     box.innerHTML = `<div class="h-full grid place-items-center text-center text-slate-600">
-      <div><div class="text-3xl mb-2">💬</div><div class="text-sm">还没有对话</div><div class="text-[11px] mt-1">发一条消息试试，模拟群与真群完全隔离</div></div>
+      <div><div class="text-3xl mb-2">💬</div><div class="text-sm">还没有对话</div><div class="text-[11px] mt-1">发一条消息试试</div></div>
     </div>`
     return
   }
@@ -215,7 +216,7 @@ function renderMessages() {
 function appendBubble(role, text, opts = {}) {
   const box = $('messages')
   const wrap = document.createElement('div')
-  wrap.className = `flex gap-2 fade-in ${role === 'assistant' ? 'justify-end' : 'justify-start'}`
+  wrap.className = `flex gap-2 fade-in ${role === 'assistant' ? 'justify-start' : 'justify-end'}`
   if (opts.runId) wrap.dataset.run = opts.runId
   const isAssistant = role === 'assistant'
   const nick = opts.nick || (isAssistant ? personaName() : '朋友')
@@ -223,7 +224,7 @@ function appendBubble(role, text, opts = {}) {
   avatar.className = `h-8 w-8 shrink-0 rounded-xl grid place-items-center text-[11px] font-bold ${isAssistant ? 'bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white' : 'bg-white/5 text-slate-300 border border-white/10'}`
   avatar.textContent = String(nick).slice(0, 1).toUpperCase()
   const content = document.createElement('div')
-  content.className = `max-w-[min(680px,78%)] ${isAssistant ? 'items-end' : 'items-start'} flex flex-col`
+  content.className = `max-w-[min(680px,78%)] ${isAssistant ? 'items-start' : 'items-end'} flex flex-col`
   const meta = document.createElement('div')
   meta.className = 'text-[10px] text-slate-500 mb-1 px-1'
   meta.textContent = `${nick}${opts.time ? ' · ' + fmtTime(opts.time) : ''}`
@@ -233,11 +234,11 @@ function appendBubble(role, text, opts = {}) {
   content.appendChild(meta)
   content.appendChild(bubble)
   if (isAssistant) {
-    wrap.appendChild(content)
     wrap.appendChild(avatar)
+    wrap.appendChild(content)
   } else {
-    wrap.appendChild(avatar)
     wrap.appendChild(content)
+    wrap.appendChild(avatar)
   }
   box.appendChild(wrap)
   scrollBottom()
@@ -268,36 +269,34 @@ function renderInspector() {
   }
   if (S.tab === 'runs') return renderRuns(box)
   if (S.tab === 'tools') return renderTools(box)
-  if (S.tab === 'events') return renderEvents(box)
   return renderContext(box)
 }
+
+const RUN_STATUS = { ok: '已回复', skipped: '已跳过', error: '失败' }
+const RUN_TRIGGER = { message: '收到消息', mention: '被 @', timer: '定时触发', manual: '手动触发', proactive: '主动发言' }
+const TOOL_NAME = { search_past_memory: '检索记忆', remember: '记住信息', send_message: '发送消息' }
 
 function renderRuns(box) {
   const runs = S.detail?.runs || []
   if (!runs.length) {
-    box.innerHTML = '<div class="text-slate-600">还没有运行记录。发一条消息后这里会显示 run。</div>'
+    box.innerHTML = '<div class="text-slate-600">还没有回复记录。</div>'
     return
   }
   box.innerHTML = ''
   for (const r of runs) {
-    const div = document.createElement('button')
     const ok = r.status === 'ok'
     const skipped = r.status === 'skipped'
+    const div = document.createElement('button')
     div.className = `w-full text-left rounded-xl border p-3 mb-2 transition ${r.id === S.selectedRun ? 'border-indigo-400/40 bg-indigo-500/10' : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.05]'}`
     div.onclick = () => { S.selectedRun = r.id; renderInspector() }
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="pill ${ok ? 'bg-emerald-500/15 text-emerald-300' : skipped ? 'bg-slate-500/15 text-slate-400' : 'bg-red-500/15 text-red-300'}">${esc(r.status)}</span>
-        <span class="text-[10px] text-slate-500">${esc(r.trigger)}</span>
+        <span class="pill ${ok ? 'bg-emerald-500/15 text-emerald-300' : skipped ? 'bg-slate-500/15 text-slate-400' : 'bg-red-500/15 text-red-300'}">${RUN_STATUS[r.status] || '完成'}</span>
+        <span class="text-[10px] text-slate-500">${RUN_TRIGGER[r.trigger] || '自动触发'}</span>
         <span class="ml-auto text-[10px] text-slate-600">${fmtDur((r.endedAt || r.startedAt) - r.startedAt)}</span>
       </div>
-      <div class="mt-1 text-[10px] text-slate-500 code truncate">${esc(r.id)}</div>
       <div class="mt-1 text-[11px] text-slate-300">${esc(short(r.reply || r.error || '（无文本）', 120))}</div>
-      <div class="mt-1 flex gap-2 text-[9px] text-slate-600">
-        <span>${esc(r.model || 'model?')}</span>
-        <span>${r.toolCalls || 0} tools</span>
-        <span>${r.tokensIn || 0}/${r.tokensOut || 0} tok</span>
-      </div>`
+      <div class="mt-1 text-[9px] text-slate-600">${fmtTime(r.startedAt)}</div>`
     box.appendChild(div)
   }
 }
@@ -306,53 +305,27 @@ function renderTools(box) {
   const runId = S.selectedRun || S.detail?.runs?.[0]?.id
   const evs = allEvents().filter(e => (!runId || e.runId === runId) && String(e.type).startsWith('tool.'))
   if (!evs.length) {
-    box.innerHTML = `<div class="text-slate-600">这个 run 没有工具调用。${runId ? `<div class="mt-1 code text-[9px]">${esc(runId)}</div>` : ''}</div>`
+    box.innerHTML = '<div class="text-slate-600">这一轮没有调用工具。</div>'
     return
   }
   const calls = new Map()
   for (const e of evs) {
     const id = e.callId || `${e.runId}:${e.name}`
-    const c = calls.get(id) || { name: e.name, args: null, result: '', status: '', durationMs: null, at: e.at }
-    if (e.type === 'tool.started') { c.name = e.name; c.args = e.args; c.at = e.at }
-    if (e.type === 'tool.finished') { c.result = e.result; c.status = e.status; c.durationMs = e.durationMs }
+    const c = calls.get(id) || { name: e.name, status: '', durationMs: null }
+    if (e.type === 'tool.started') c.name = e.name
+    if (e.type === 'tool.finished') { c.status = e.status; c.durationMs = e.durationMs }
     calls.set(id, c)
   }
   box.innerHTML = ''
-  for (const [id, c] of calls) {
+  for (const c of calls.values()) {
     const div = document.createElement('div')
     div.className = 'rounded-xl border border-white/5 bg-white/[0.02] p-3 mb-2'
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-medium text-indigo-200">${esc(c.name)}</span>
-        <span class="pill ${c.status === 'error' ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'}">${esc(c.status || 'running')}</span>
+        <span class="text-[11px] font-medium text-indigo-200">${TOOL_NAME[c.name] || '工具调用'}</span>
+        <span class="pill ${c.status === 'error' ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'}">${c.status === 'error' ? '失败' : c.status === 'ok' ? '完成' : '进行中'}</span>
         <span class="ml-auto text-[9px] text-slate-600">${fmtDur(c.durationMs)}</span>
-      </div>
-      <div class="mt-2 text-[9px] text-slate-600 code break-all">${esc(id)}</div>
-      ${c.args ? `<div class="mt-2 text-[10px] text-slate-400">参数</div><pre class="mt-1 p-2 rounded-lg bg-black/20 text-[10px] text-slate-400 overflow-auto">${esc(JSON.stringify(c.args, null, 2))}</pre>` : ''}
-      ${c.result ? `<div class="mt-2 text-[10px] text-slate-400">返回</div><div class="mt-1 p-2 rounded-lg bg-black/20 text-[10px] text-slate-400 whitespace-pre-wrap break-words">${esc(short(c.result, 600))}</div>` : ''}`
-    box.appendChild(div)
-  }
-}
-
-function renderEvents(box) {
-  const evs = allEvents().slice(-160).reverse()
-  if (!evs.length) {
-    box.innerHTML = '<div class="text-slate-600">暂无事件。</div>'
-    return
-  }
-  box.innerHTML = ''
-  for (const e of evs) {
-    const div = document.createElement('div')
-    div.className = 'rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-2 mb-1.5'
-    const payload = { ...e }
-    delete payload.type
-    delete payload.thread
-    div.innerHTML = `
-      <div class="flex items-center gap-2">
-        <span class="text-[10px] text-indigo-300">${esc(e.type)}</span>
-        <span class="ml-auto text-[9px] text-slate-600">${fmtTime(e.at)}</span>
-      </div>
-      <div class="mt-1 text-[9px] text-slate-500 code break-all">${esc(short(JSON.stringify(payload), 220))}</div>`
+      </div>`
     box.appendChild(div)
   }
 }
@@ -360,27 +333,21 @@ function renderEvents(box) {
 function renderContext(box) {
   const t = S.detail.meta
   const d = S.detail
-  const sim = S.snapshot?.sim
+  const provider = String(S.status?.llm?.provider || '')
+  const providerName = provider.replace(/\s*\(.*?\)\s*/g, '').trim()
+  const model = /agnes/i.test(provider) ? 'Agnes 2.5（本地）' : (providerName || S.status?.llm?.model || '未知模型')
   box.innerHTML = `
     <div class="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-      <div class="text-[10px] text-slate-500">thread</div>
-      <div class="mt-1 code text-[11px] text-slate-300">${esc(t.id)}</div>
+      <div class="text-[10px] text-slate-500">会话</div>
+      <div class="mt-1 text-[12px] text-slate-200">${esc(t.title)}</div>
       <div class="mt-2 grid grid-cols-2 gap-2 text-[10px]">
-        <div><span class="text-slate-600">channel</span><div class="text-slate-300">${esc(t.channel)}</div></div>
-        <div><span class="text-slate-600">kind</span><div class="text-slate-300">${esc(t.kind)}</div></div>
-        <div><span class="text-slate-600">messages</span><div class="text-slate-300">${d.dialog?.length || 0}</div></div>
-        <div><span class="text-slate-600">unread</span><div class="text-slate-300">${t.unread}</div></div>
+        <div><span class="text-slate-600">消息</span><div class="text-slate-300">${d.dialog?.length || 0} 条</div></div>
+        <div><span class="text-slate-600">未读</span><div class="text-slate-300">${t.unread} 条</div></div>
       </div>
     </div>
     <div class="mt-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
       <div class="text-[10px] text-slate-500">模型</div>
-      <div class="mt-1 text-[11px] text-slate-300">${esc(S.status?.llm?.provider || '?')} / ${esc(S.status?.llm?.model || '?')}</div>
-      <div class="mt-1 text-[9px] text-slate-600">${esc(S.status?.llm?.baseUrl || '')}</div>
-    </div>
-    <div class="mt-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
-      <div class="text-[10px] text-slate-500">模拟通道隔离</div>
-      <div class="mt-1 text-[11px] text-slate-300">群号 ${sim ? `${sim.groupMin}–${sim.groupMax}` : '900000–999999'}</div>
-      <div class="mt-1 text-[9px] text-slate-600">真群只读；/api/v2 拒绝向 QQ 发送。</div>
+      <div class="mt-1 text-[11px] text-slate-300">${esc(model)}</div>
     </div>
     ${d.summary ? `<div class="mt-2 rounded-xl border border-white/5 bg-white/[0.02] p-3"><div class="text-[10px] text-slate-500">历史摘要</div><div class="mt-1 text-[10px] text-slate-400 whitespace-pre-wrap">${esc(d.summary)}</div></div>` : ''}`
 }
@@ -433,7 +400,7 @@ async function send() {
 async function newSimGroup(id, silent) {
   let groupId = id
   if (groupId === undefined && !silent) {
-    const raw = prompt('模拟群号（900000–999999，和真群隔离）', String(S.snapshot?.sim?.defaultGroup || 900001))
+    const raw = prompt('模拟群号（900000–999999）', String(S.snapshot?.sim?.defaultGroup || 900001))
     if (raw === null) return
     groupId = Number(raw)
   }
@@ -448,7 +415,7 @@ async function newSimGroup(id, silent) {
 }
 
 async function newSimPrivate() {
-  const raw = prompt('模拟私聊 QQ 号（任意数字，和真 QQ 隔离）', '10001')
+  const raw = prompt('模拟私聊号', '10001')
   if (raw === null) return
   try {
     const j = await api('/api/v2/threads/sim', {

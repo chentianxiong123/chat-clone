@@ -97,25 +97,19 @@
           <aside class="v2-threads shrink-0 border-r border-white/5 bg-[#0d1220] flex flex-col">
             <div class="px-4 pt-4 pb-3 border-b border-white/5">
               <div class="text-sm font-semibold tracking-wide">会话</div>
-              <div class="text-[10px] text-slate-500 mt-0.5">sim channel · v2 kernel</div>
               <div class="mt-3 grid grid-cols-2 gap-2">
                 <button id="new-group" class="h-8 rounded-lg bg-indigo-500/90 hover:bg-indigo-400 text-white text-xs font-medium">新建模拟群</button>
                 <button id="new-private" class="h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs">模拟私聊</button>
               </div>
             </div>
 
-            <div class="px-4 py-2 flex items-center justify-between">
-              <span class="text-[10px] uppercase tracking-widest text-slate-500">Threads</span>
+            <div class="px-4 py-2 flex items-center justify-end">
               <label class="flex items-center gap-1.5 text-[10px] text-slate-500 select-none cursor-pointer">
-                <input id="show-qq" type="checkbox" class="accent-indigo-500"> 显示 QQ 只读
+                <input id="show-qq" type="checkbox" class="accent-indigo-500"> 显示 QQ
               </label>
             </div>
             <div id="threads" class="flex-1 overflow-y-auto px-2 pb-3 space-y-1"></div>
 
-            <div class="p-3 border-t border-white/5 text-[10px] leading-relaxed text-slate-500">
-              <div class="flex items-center gap-2 text-slate-400"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> 模拟号段 900000–999999</div>
-              <div class="mt-1">真群/真私聊只读，控制台不会向 QQ 发送。</div>
-            </div>
           </aside>
 
           <!-- 聊天区 -->
@@ -127,7 +121,7 @@
                   <span id="thread-badge" class="pill bg-white/5 text-slate-400 border border-white/10 hidden"></span>
                   <span id="thread-paused" class="pill bg-amber-500/15 text-amber-300 border border-amber-500/20 hidden">已暂停</span>
                 </div>
-                <div id="thread-sub" class="text-[11px] text-slate-500 mt-0.5 truncate">模拟通道与真群隔离</div>
+                <div id="thread-sub" class="text-[11px] text-slate-500 mt-0.5 truncate"></div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button id="trigger" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 disabled:opacity-40">触发一轮</button>
@@ -162,17 +156,16 @@
                     <textarea id="composer" rows="2" class="flex-1 resize-none rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm leading-relaxed outline-none focus:border-indigo-400/50 placeholder:text-slate-600" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
                     <button id="send" class="h-10 px-5 rounded-xl bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 text-white text-sm font-medium">发送</button>
                   </div>
-                  <div id="composer-hint" class="mt-1 text-[10px] text-slate-600">模拟群消息不会写入 QQ 群统计，也不会通过 NapCat 发送。</div>
+                  <div id="composer-hint" class="hidden mt-1 text-[10px] text-slate-600"></div>
                 </div>
               </section>
 
               <!-- inspector -->
               <aside class="v2-inspector shrink-0 border-l border-white/5 bg-[#0d1220] flex flex-col">
                 <div class="p-2 border-b border-white/5 flex gap-1">
-                  <button data-tab="runs" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">运行</button>
+                  <button data-tab="runs" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">回复</button>
                   <button data-tab="tools" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">工具</button>
-                  <button data-tab="events" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">事件</button>
-                  <button data-tab="context" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">上下文</button>
+                  <button data-tab="context" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">会话</button>
                 </div>
                 <div id="inspector" class="flex-1 overflow-y-auto p-3 text-[11px]"></div>
               </aside>
