@@ -21,7 +21,7 @@
       <button class="side-item active" data-page="overview" title="总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z"/></svg><span>总览</span></button>
       <button class="side-item" data-page="chat" title="实时聊天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2.5-2.5A8 8 0 1 1 21 12z"/></svg><span>聊天</span></button>
       <button class="side-item" data-page="persona" title="人设"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg><span>人设</span></button>
-      <button class="side-item" data-page="kb" title="知识库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2zM4 19a2 2 0 0 0 2 2h14"/></svg><span>知识库</span></button>
+      <button class="side-item" data-page="kb" title="RAG 记忆库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2zM4 19a2 2 0 0 0 2 2h14"/></svg><span>RAG</span></button>
       <button class="side-item" data-page="stats" title="统计"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 4-8"/></svg><span>统计</span></button>
       <button class="side-item" data-page="logs" title="日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>日志</span></button>
       <button class="side-item" data-page="config" title="配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1l2.1-2.1M17 7l2.1-2.1"/></svg><span>配置</span></button>
@@ -40,7 +40,6 @@
         <span class="text-xs text-slate-500 hidden sm:inline">· Agent 控制台</span>
       </div>
       <div class="flex items-center gap-3">
-        <span id="rag-badge" class="stat-tag">RAG --</span>
         <span id="footer-time" class="text-xs font-mono text-slate-500"></span>
       </div>
     </header>
@@ -78,8 +77,11 @@
       <div id="recent-state" class="glass round-2xl p-5 mt-4"></div>
 
       <div class="glass round-2xl p-5 mt-4">
-        <div class="text-sm font-semibold mb-3">活跃群</div>
-        <div id="group-list" class="space-y-3"></div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">会话列表 <span class="text-[10px] text-slate-500 font-normal">真群 / 模拟群 · 点击进入聊天</span></div>
+          <button id="ov-goto-chat" class="btn btn-xs btn-ghost">去聊天页 →</button>
+        </div>
+        <div id="group-list" class="space-y-1"></div>
       </div>
     </section>
 
@@ -196,15 +198,48 @@
       </div>
     </section>
 
-    <!-- ══ 知识库 ══ -->
+    <!-- ══ RAG 记忆库 ══ -->
     <section id="page-kb" class="page">
       <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-sm font-semibold">RAG 记忆库
+            <span class="text-[10px] text-slate-500 font-normal ml-2">本人过往聊天记录切块 → 向量化 → 每轮检索注入，保持说话风格</span>
+          </div>
+          <button id="rag-refresh" class="btn btn-sm btn-ghost">刷新</button>
+        </div>
+        <div id="rag-overview" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3"></div>
+      </div>
+
+      <!-- 检索编排（可编辑，即时生效） -->
+      <div class="glass round-2xl p-5 mb-4">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">RAG 检索（向量 vec0 + FTS5 + LIKE）</div>
+          <div class="text-sm font-semibold">检索编排
+            <span class="text-[10px] text-slate-500 font-normal ml-2">控制什么时候向量、什么时候本地检索 · 即时生效并写回 .env</span>
+          </div>
+          <button id="rag-save" class="btn btn-sm btn-primary">保存并生效</button>
+        </div>
+        <div id="rag-orchestrate" class="text-xs text-slate-400"></div>
+        <div id="rag-save-note" class="mt-2 text-xs text-emerald-400"></div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4 mb-4">
+        <div class="glass round-2xl p-5">
+          <div class="text-sm font-semibold mb-3">导入情况</div>
+          <div id="rag-import" class="text-xs text-slate-400"><div class="text-slate-600">加载中…</div></div>
+        </div>
+        <div class="glass round-2xl p-5">
+          <div class="text-sm font-semibold mb-3">连接信息 <span class="text-[10px] text-slate-500 font-normal">库 / 端点 · 改动需重启</span></div>
+          <div id="rag-config" class="text-xs text-slate-400"></div>
+        </div>
+      </div>
+
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">手动检索测试</div>
           <span id="kb-meta" class="text-xs text-slate-500 font-mono"></span>
         </div>
         <div class="flex gap-2">
-          <input id="rag-q" class="input input-sm input-bordered flex-1" placeholder="查询内容，如：nmsl / 你妈炸了 / 今天吃什么">
+          <input id="rag-q" class="input input-sm input-bordered flex-1" placeholder="查询内容，如：今天吃什么 / 你最近忙什么">
           <button id="rag-go" class="btn btn-sm btn-primary">检索</button>
         </div>
         <div id="rag-meta" class="mt-2 text-xs text-slate-500"></div>

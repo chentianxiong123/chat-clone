@@ -42,6 +42,10 @@ export class AgentKernel {
     return this.harness.getThreads()
   }
 
+  getThreadsWithCounts(): { threads: ThreadMeta[]; counts: Record<string, number> } {
+    return this.harness.getThreadsWithCounts()
+  }
+
   getThread(id: string) {
     return this.harness.getThread(id)
   }

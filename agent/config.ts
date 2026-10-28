@@ -342,6 +342,8 @@ export const config = {
     groupMin: envNum('SIM_GROUP_MIN', 900000),
     groupMax: envNum('SIM_GROUP_MAX', 999999),
     defaultGroup: envNum('SIM_GROUP_DEFAULT', 900001),
+    // 真群号列表（SIM_REAL_GROUPS，默认 719972557）：唯一真群，其余全是模拟群
+    realGroups: (process.env.SIM_REAL_GROUPS || '719972557').split(',').map(s => Number(s.trim())).filter(Boolean),
     reactMsMin: envNum('SIM_REACT_MS_MIN', 250),
     reactMsMax: envNum('SIM_REACT_MS_MAX', 1100),
     segGapMsMin: envNum('SIM_SEG_GAP_MIN_MS', 180),

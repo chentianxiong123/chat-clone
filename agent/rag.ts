@@ -1,6 +1,7 @@
 import { config } from './config.js'
 import { embed } from './llm.js'
 import { DatabaseSync } from 'node:sqlite'
+import { statSync } from 'node:fs'
 
 export interface RagHit {
   chunkId: string
@@ -270,5 +271,67 @@ export async function ragStatus(): Promise<{
     embedOk: !!config.rag.embedEndpoint && config.rag.embedEnabled,
     strategy: config.rag.strategy,
     enabledModes,
+  }
+}
+
+export interface RagSourceStat {
+  name: string; count: number; minDate: string; maxDate: string; avgChars: number
+}
+export interface RagImportInfo {
+  dbSize: number
+  total: number
+  minDate: string
+  maxDate: string
+  totalChars: number
+  totalMessages: number
+  embeddedDone: number
+  embeddedTotal: number
+  sources: RagSourceStat[]
+  monthly: { m: string; n: number }[]
+  meta: Record<string, string>
+}
+
+// ── 导入情况：chunk 库的总量 / 时间跨度 / 来源分布 / embed 覆盖 / 月度分布 ──
+export async function ragImportInfo(): Promise<RagImportInfo | null> {
+  const db = await openDb()
+  if (!db) return null
+  try {
+    let dbSize = 0
+    try { dbSize = statSync(config.rag.dbPath).size } catch { /* ignore */ }
+    const base = db.prepare(
+      'select count(*) n, min(date) mn, max(date) mx, sum(char_count) chars, sum(message_count) msgs from chunks',
+    ).get() as { n: number; mn: string; mx: string; chars: number | null; msgs: number | null }
+    const sourceRows = db.prepare(`
+      select case when chunk_id like 'wechat_%' then 'wechat'
+                  when chunk_id like 'qq_%' then 'qq'
+                  else 'other' end as name,
+             count(*) n, min(date) mn, max(date) mx, round(avg(char_count)) ac
+      from chunks group by 1 order by 2 desc
+    `).all() as Array<{ name: string; n: number; mn: string; mx: string; ac: number }>
+    const emb = db.prepare(
+      'select count(*) t, sum(case when embedded_at is not null then 1 else 0 end) d from chunks',
+    ).get() as { t: number; d: number | null }
+    const monthly = db.prepare(
+      'select substr(date,1,7) m, count(*) n from chunks group by 1 order by 1',
+    ).all() as Array<{ m: string; n: number }>
+    const metaRows = db.prepare('select key, value from meta').all() as Array<{ key: string; value: string }>
+    const meta: Record<string, string> = {}
+    for (const r of metaRows) meta[r.key] = r.value
+    return {
+      dbSize,
+      total: base.n,
+      minDate: base.mn,
+      maxDate: base.mx,
+      totalChars: base.chars ?? 0,
+      totalMessages: base.msgs ?? 0,
+      embeddedDone: emb.d ?? 0,
+      embeddedTotal: emb.t,
+      sources: sourceRows.map(r => ({ name: r.name, count: r.n, minDate: r.mn, maxDate: r.mx, avgChars: r.ac })),
+      monthly,
+      meta,
+    }
+  } catch (e) {
+    console.warn('[RAG] 读取导入信息失败:', (e as Error).message)
+    return null
   }
 }

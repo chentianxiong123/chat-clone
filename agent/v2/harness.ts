@@ -3,7 +3,7 @@ import type { EventBus } from './bus.js'
 import type { AgentRuntime } from './runtime.js'
 import {
   appendEvent, ensureThread, getThreadDetail, listEvents, listThreads, markRead, setArchived, setPaused,
-  touchThread,
+  threadMessageCounts, touchThread,
 } from './store.js'
 import {
   isSimGroupId, parseThreadKey, threadKey, threadTitle,
@@ -41,8 +41,10 @@ function quietHours(): boolean {
 
 function sceneAllowed(thread: ThreadRef): boolean {
   if (thread.channel === 'sim') {
-    return thread.kind === 'private' || isSimGroupId(thread.externalId)
+    // 模拟群：除真群外的一切群 + 私聊（号段不再限制）
+    return thread.kind === 'private' || !config.sim.realGroups.includes(thread.externalId)
   }
+  // qq 通道 = 唯一真群
   const key = threadKey(thread)
   const bare = String(thread.externalId)
   if (config.agent.denyScenes.some(x => x === key || x === bare)) return false
@@ -196,6 +198,10 @@ export class Harness {
     return listThreads()
   }
 
+  getThreadsWithCounts(): { threads: ThreadMeta[]; counts: Record<string, number> } {
+    return { threads: listThreads(), counts: threadMessageCounts() }
+  }
+
   getThread(id: string) {
     return getThreadDetail(id)
   }
@@ -229,7 +235,7 @@ export class Harness {
       ? (id ?? config.sim.defaultGroup)
       : (id || 10001)
     if (kind === 'group' && !isSimGroupId(externalId)) {
-      throw new Error(`模拟群号必须在 ${config.sim.groupMin}~${config.sim.groupMax}，与真群隔离`)
+      throw new Error(`群号 ${externalId} 是真群（SIM_REAL_GROUPS），不能创建为模拟群`)
     }
     return ensureThread({ channel: 'sim', kind, externalId })
   }

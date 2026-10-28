@@ -109,11 +109,13 @@ export function threadTitle(ref: ThreadRef): string {
   if (ref.channel === 'sim') {
     return ref.kind === 'group' ? `模拟群 ${ref.externalId}` : `模拟私聊 ${ref.externalId}`
   }
-  return ref.kind === 'group' ? `QQ群 ${ref.externalId}` : `私聊 ${ref.externalId}`
+  // qq 通道 = 真群
+  return ref.kind === 'group' ? `真群 ${ref.externalId}` : `真群私聊 ${ref.externalId}`
 }
 
 export function isSimGroupId(id: number): boolean {
-  return Number.isInteger(id) && id >= config.sim.groupMin && id <= config.sim.groupMax
+  // 模拟群 = 除真群外的一切群号（SIM_REAL_GROUPS 之外的都可当模拟群）
+  return Number.isInteger(id) && !config.sim.realGroups.includes(id)
 }
 
 export function isSimThread(key: string): boolean {

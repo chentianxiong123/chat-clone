@@ -30,7 +30,8 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     else if (location.hash) history.replaceState(null, '', location.pathname + location.search)
     if (page === 'stats') loadStats(currentRange)
     if (page === 'persona') { loadPersona(); loadMemory() }
-    if (page === 'kb') loadKbMeta()
+    if (page === 'kb') void loadRagInfo()
+    if (page === 'overview') void loadThreadOverview()
   })
 })
 
@@ -54,7 +55,7 @@ function greeting() {
   return ['夜深了', '🌙']
 }
 
-// ── 渲染状态 ──
+// ── 渲染运行时状态（连接/冷却/近期状态）──
 function renderState(snap) {
   currentSnap = snap
   $('conn-dot').className = 'pulse-dot ' + (snap.connected ? 'live' : 'dead')
@@ -67,25 +68,12 @@ function renderState(snap) {
   $('ov-conn-note').textContent = snap.connError || (snap.connected ? 'NapCat 正常' : '未接入 NapCat 适配器')
   if (snap.connError) $('ov-conn').classList.add('text-red-400')
   else $('ov-conn').classList.remove('text-red-400')
-  $('ov-groups').textContent = String(Object.keys(snap.groups).length)
   $('ov-last-reply').textContent = fmtTime(snap.lastReplyAt)
-  let dialogTotal = 0
-  for (const g of Object.values(snap.groups)) dialogTotal += g.dialog.length
-  $('ov-dialog').textContent = String(dialogTotal)
   $('ov-batch-n').textContent = snap.batchN
   $('ov-batch-t').textContent = (snap.batchT / 1000).toFixed(0)
   $('ov-cooldown').textContent = snap.cooldownLeftMs > 0 ? fmtSince(snap.cooldownLeftMs) : '就绪'
   $('ov-mode-note').textContent = 'respondMode: ' + snap.respondMode
   renderRecentState(snap.recentState)
-
-  const list = $('group-list')
-  const groups = Object.values(snap.groups).sort((a, b) => b.lastReplyAt - a.lastReplyAt)
-  if (!groups.length) {
-    list.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">还没有群消息，去「聊天」页模拟几条试试</div>`
-    return
-  }
-  list.innerHTML = groups.map((g) => renderGroup(g)).join('')
-  bindGroupButtons()
 }
 
 // ── 近期状态卡片 ──
@@ -134,69 +122,54 @@ function renderRecentState(s) {
   `
 }
 
-// ── 场景卡片 ──
-function batchNFor(g) {
-  return g.scene === 'private' ? (currentSnap?.privateBatchN || 1) : (currentSnap?.batchN || 5)
-}
-
-function renderGroup(g) {
-  const tLeft = g.timerDeadlineAt ? Math.max(0, g.timerDeadlineAt - Date.now()) : null
-  const timerBadge = tLeft !== null
-    ? `<span class="badge badge-sm badge-warning">攒批中 ${fmtSince(tLeft)}</span>`
-    : (g.pending.length ? `<span class="badge badge-sm badge-info">待触发</span>` : ``)
-  const bn = batchNFor(g)
-  const batchPct = currentSnap ? Math.min(100, Math.round((g.pending.length / bn) * 100)) : 0
-  const progressHtml = g.pending.length
-    ? `<div class="mt-2">
-        <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-          <span>攒批进度</span><span class="font-mono">${g.pending.length}/${bn}</span>
+// ── 活跃群概览（统一用 v2 线程数据）──
+async function loadThreadOverview() {
+  try {
+    const r = await fetch('/api/v2/threads')
+    const j = await r.json()
+    const ts = j.threads || []
+    const totals = j.totals || {}
+    $('ov-groups').textContent = String(totals.threads ?? ts.length)
+    $('ov-dialog').textContent = String(totals.messages ?? 0)
+    const list = $('group-list')
+    if (!list) return
+    if (!ts.length) {
+      list.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">还没有会话，去「聊天」页新建</div>`
+      return
+    }
+    const real = ts.filter(t => t.channel === 'qq' && !t.archived)
+    const sims = ts.filter(t => t.channel === 'sim' && !t.archived)
+    const arch = ts.filter(t => t.archived)
+    const row = (t) => `
+      <div class="flex items-center justify-between p-2 rounded-xl border border-white/5 hover:bg-white/5 transition" data-thread="${esc(t.id)}" role="button">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-bold ${t.channel === 'qq' ? 'text-indigo-300' : 'text-slate-300'}">${t.channel === 'qq' ? '真群' : (t.kind === 'group' ? '模拟群' : '模拟私聊')}</span>
+            <span class="font-mono text-[12px] ${t.channel === 'qq' ? 'text-indigo-200' : 'text-slate-200'}">${esc(t.externalId)}</span>
+            ${t.paused ? '<span class="pill bg-amber-500/15 text-amber-300">暂停</span>' : ''}
+          </div>
+          <div class="text-[10px] text-slate-500 truncate mt-0.5">${esc(t.lastPreview || '（暂无消息）')}</div>
         </div>
-        <div class="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
-          <div class="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full transition-all" style="width:${batchPct}%"></div>
+        <div class="shrink-0 text-right ml-3">
+          <div class="text-[10px] font-mono text-slate-400">${t.messageCount || 0} 条</div>
+          <div class="text-[9px] text-slate-600 mt-0.5">${fmtTime(t.lastMessageAt)}</div>
         </div>
       </div>`
-    : ``
-  const pendingHtml = g.pending.length
-    ? `<div class="text-xs text-amber-300/80 mt-1">攒批：
-        <span class="font-mono">${esc(g.pending.join(' ').slice(0, 160))}</span></div>`
-    : ``
-  const sceneBadge = g.scene === 'private'
-    ? `<span class="badge badge-sm badge-accent">私聊</span>` : ``
-  const dialogHtml = g.dialog.length
-    ? `<div class="mt-2 space-y-1">${
-        g.dialog.map((m) => `
-          <div class="text-xs ${m.role === 'user' ? 'text-sky-300' : 'text-emerald-300'} leading-snug">
-            <span class="text-[10px] text-slate-600 font-mono mr-1">${m.time ? fmtTime(m.time) : ''}</span>
-            ${m.role === 'user' ? '👤' : '🤖'}${esc(m.content.slice(0, 80))}
-          </div>`).join('')
-      }</div>
-      <div class="text-[10px] text-slate-600 mt-1">记忆 ${g.dialog.length} 条</div>`
-    : ``
-  return `
-  <div class="glass round-2xl p-4" data-key="${g.key}">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="font-mono font-semibold">${g.title}</div>
-        ${sceneBadge}
-      </div>
-      <div class="flex gap-2 items-center">
-        ${timerBadge}
-        <button class="btn btn-xs btn-primary act-flush">立即触发</button>
-      </div>
-    </div>
-    ${progressHtml}
-    ${pendingHtml}
-    ${dialogHtml}
-  </div>`
-}
-
-function bindGroupButtons() {
-  document.querySelectorAll('.act-flush').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const key = btn.closest('[data-key]').dataset.key
-      await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
+    const head = (label, cls) => `<div class="px-1 pt-2 pb-1 text-[10px] uppercase tracking-widest font-semibold ${cls}">${label}</div>`
+    let html = ''
+    if (real.length) html += head('真群', 'text-indigo-400') + real.map(row).join('')
+    if (sims.length) html += head('模拟群', 'text-slate-500') + sims.map(row).join('')
+    if (arch.length) html += head('已归档', 'text-slate-600') + arch.map(row).join('')
+    list.innerHTML = html
+    list.querySelectorAll('[data-thread]').forEach(el => {
+      el.addEventListener('click', () => {
+        location.hash = '#chat'
+        setTimeout(() => window.dispatchEvent(new CustomEvent('open-thread', { detail: el.dataset.thread })), 50)
+      })
     })
-  })
+  } catch (e) {
+    console.warn('loadThreadOverview', e)
+  }
 }
 
 // ── 人设 ──
@@ -243,15 +216,201 @@ async function loadMemory() {
     : '<div class="text-slate-600">暂无记忆，聊一会儿后这里会显示 LLM 摘要</div>')
 }
 
-// ── 知识库 ──
-async function loadKbMeta() {
-  const r = await fetch('/api/status')
+// ── RAG 记忆库 ──
+let ragInfo = null
+async function loadRagInfo() {
+  const r = await fetch('/api/rag/info')
   const res = await r.json()
-  if (res.rag) {
-    $('kb-meta').textContent = `vec0 ${res.rag.vecLoaded ? '✓' : '✗'} · ${res.rag.count ? res.rag.count + ' chunk' : ''} · ${res.rag.embedOk ? 'embed ✓' : 'embed ✗'}`
-    $('rag-badge').textContent = `RAG ${res.rag.vecLoaded ? 'vec' : ''} ${res.rag.count ? '·' + res.rag.count + 'chunk' : ''} ${res.rag.embedOk ? '·embed' : ''}`
+  ragInfo = res
+  const st = res.status || {}
+  const im = res.import || null
+  const cfg = res.config || {}
+  $('kb-meta').textContent = `vec0 ${st.vecLoaded ? '✓' : '✗'} · ${st.count != null ? fmtNum(st.count) + ' chunk' : '未配置'} · embed ${st.embedOk ? '✓' : '✗'}`
+
+  // 状态（4 张低信息熵卡片，一眼看清）
+  const sysParts = [
+    (st.vecLoaded ? 'vec0' : 'vec0 ✗'),
+    (st.ftsOk ? 'FTS5' : 'FTS5 ✗'),
+    (st.embedOk ? 'Embed' : 'Embed ✗'),
+  ]
+  const allOk = st.vecLoaded && st.ftsOk && st.embedOk
+  const spanMonths = im && im.monthly ? im.monthly.length : 0
+  const spanYears = im && im.minDate ? `${im.minDate.slice(0, 4)}~${im.maxDate.slice(0, 4)}` : '--'
+  const srcNames = im && im.sources ? im.sources.map(s => s.name).join(' / ') : '--'
+  const embPctTop = im && im.embeddedTotal ? Math.round((im.embeddedDone / im.embeddedTotal) * 100) : null
+  const cards = [
+    { label: '系统', value: allOk ? '<span class="text-emerald-400">✓ 就绪</span>' : '<span class="text-amber-400">部分降级</span>', sub: sysParts.join(' · ') },
+    { label: 'Chunk', value: im ? fmtNum(im.total) : '--', sub: im ? `${(im.totalChars / 10000).toFixed(1)} 万字` : '库未打开' },
+    { label: '跨度', value: spanYears, sub: im ? `${spanMonths} 个月 · ${esc(srcNames)}` : '--' },
+    { label: 'Embed 覆盖', value: embPctTop != null ? embPctTop + '%' : '--', sub: im ? `${esc(im.meta?.embedding_dim || '--')} 维` : '--' },
+  ]
+  $('rag-overview').innerHTML = cards.map(c => `
+    <div class="glass round-xl p-3">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-note font-mono">${c.sub}</div>
+    </div>`).join('')
+
+  // 编排表单（可编辑，即时生效）
+  renderRagForm(cfg)
+
+  const imEl = $('rag-import')
+  if (!im || !im.total) {
+    imEl.innerHTML = '<div class="text-slate-600">无导入数据（RAG_DB_PATH 未配置或库为空）</div>'
+  } else {
+    const srcRows = (im.sources || []).map(s => `
+      <div class="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
+        <span class="font-mono text-sky-300">${esc(s.name)}</span>
+        <span class="text-slate-400">${fmtNum(s.count)} 块 · ${s.minDate.slice(0, 7)} ~ ${s.maxDate.slice(0, 7)}</span>
+      </div>`).join('')
+    const maxM = Math.max(...(im.monthly || []).map(x => x.n), 1)
+    const bars = (im.monthly || []).map(x => `
+      <div class="flex items-center gap-1.5" title="${x.m}：${x.n} 块">
+        <span class="text-[9px] text-slate-600 font-mono w-11 shrink-0">${x.m}</span>
+        <div class="flex-1 h-3 bg-black/40 rounded-sm overflow-hidden"><div class="h-full bg-cyan-400/60 rounded-sm" style="width:${Math.max(3, Math.round((x.n / maxM) * 100))}%"></div></div>
+        <span class="text-[9px] text-slate-500 font-mono w-10 text-right shrink-0">${x.n}</span>
+      </div>`).join('')
+    imEl.innerHTML = `
+      <div class="text-xs text-slate-400 mb-3">共 <span class="font-mono text-slate-200">${fmtNum(im.totalMessages)}</span> 条消息 · <span class="font-mono text-slate-200">${(im.totalChars / 10000).toFixed(1)}</span> 万字 · <span class="font-mono text-slate-200">${im.minDate}</span> ~ <span class="font-mono text-slate-200">${im.maxDate}</span></div>
+      <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">来源分布</div>
+      ${srcRows || '<div class="text-slate-600">无数据</div>'}
+      <div class="text-[10px] text-slate-500 uppercase tracking-wider mt-3 mb-1">月度分布（${(im.monthly || []).length} 个月）</div>
+      <div class="space-y-1 max-h-52 overflow-y-auto pr-1">${bars}</div>`
+  }
+
+  // 连接信息（库 / 端点 —— 改动需重启）
+  const conn = [
+    ['库路径', cfg.dbPath || '未配置'],
+    ['vec0 扩展', cfg.vec0 ? cfg.vec0.split('/').pop() : '未配置'],
+    ['Embed 模型', cfg.embedModel || '--'],
+    ['Embed 端点', cfg.embedEndpoint || '未配置'],
+  ]
+  $('rag-config').innerHTML = conn.map(([k, v]) => `
+    <div class="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-0">
+      <span class="text-slate-500 shrink-0">${k}</span>
+      <span class="font-mono text-slate-300 text-right break-all">${esc(String(v))}</span>
+    </div>`).join('')
+}
+
+// ── 检索编排表单（可编辑，即时生效）──
+function renderRagForm(cfg) {
+  const strat = cfg.strategy || ['vec', 'fts', 'like']
+  const labelOf = { vec: '向量', fts: '全文', like: '关键词' }
+  const el = $('rag-orchestrate')
+  if (!el) return
+  el.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">注入方式</div>
+        <div class="flex gap-2">
+          <button type="button" class="rag-chip mode-btn ${cfg.toolsEnabled ? '' : 'active'}" data-mode="false">每轮固定</button>
+          <button type="button" class="rag-chip mode-btn ${cfg.toolsEnabled ? 'active' : ''}" data-mode="true">工具按需</button>
+        </div>
+        <div class="rag-form-hint">固定=每轮都注入；工具=模型自己决定是否回忆</div>
+      </div>
+      ${['vec', 'fts', 'like'].map(ch => `
+        <div class="glass p-3 round-xl">
+          <div class="rag-form-label">${labelOf[ch]}通道</div>
+          <button type="button" class="rag-chip strat-btn ${strat.includes(ch) ? 'active' : ''}" data-ch="${ch}" style="width:100%">${strat.includes(ch) ? '开' : '关'}</button>
+        </div>`).join('')}
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div class="glass p-3 round-xl">
+        <div class="flex items-center justify-between mb-1">
+          <span class="rag-form-label">向量升级概率</span>
+          <span class="font-mono text-slate-300" id="rag-vp-v">${Math.round((cfg.vecProb || 0) * 100)}%</span>
+        </div>
+        <input type="range" id="rag-vp" class="w-full accent-indigo-500" min="0" max="100" step="5" value="${Math.round((cfg.vecProb || 0) * 100)}">
+        <div class="rag-form-hint">本地有命中时，以该概率额外升级向量（0=只用本地省钱）</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">本地空时强制向量</div>
+        <label class="flex items-center gap-2 text-[11px] text-slate-300 select-none">
+          <input type="checkbox" id="rag-fallback" class="accent-indigo-500" ${cfg.vecFallbackOnEmpty ? 'checked' : ''}> 无命中就向量兜底
+        </label>
+        <div class="rag-form-hint">保证每轮都有人格参考</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">每路命中 topK</div>
+        <input type="number" id="rag-topk" class="rag-num" min="1" max="50" value="${cfg.topK ?? 3}">
+        <div class="rag-form-hint">每个通道最多取几条</div>
+      </div>
+    </div>
+    <div id="rag-toolbox" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 ${cfg.toolsEnabled ? '' : 'hidden'}">
+      <div class="glass p-3 round-xl">
+        <div class="flex items-center justify-between mb-1">
+          <span class="rag-form-label">主动回忆概率</span>
+          <span class="font-mono text-slate-300" id="rag-rp-v">${Math.round((cfg.recallProb || 0) * 100)}%</span>
+        </div>
+        <input type="range" id="rag-rp" class="w-full accent-indigo-500" min="0" max="100" step="5" value="${Math.round((cfg.recallProb || 0) * 100)}">
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">工具循环上限</div>
+        <input type="number" id="rag-maxiter" class="rag-num" min="1" max="10" value="${cfg.toolMaxIter ?? 2}">
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">每次注入条数</div>
+        <input type="number" id="rag-maxitems" class="rag-num" min="1" max="10" value="${cfg.toolMaxItems ?? 1}">
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="rag-form-label">单条记忆上限</div>
+        <input type="number" id="rag-fact" class="rag-num" min="10" max="500" step="10" value="${cfg.factMaxChars ?? 60}">
+      </div>
+    </div>`
+
+  el.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => {
+    const on = b.dataset.mode === 'true'
+    el.querySelectorAll('.mode-btn').forEach(x => x.classList.toggle('active', x.dataset.mode === String(on)))
+    $('rag-toolbox').classList.toggle('hidden', !on)
+  }))
+  el.querySelectorAll('.strat-btn').forEach(b => b.addEventListener('click', () => {
+    const on = !b.classList.contains('active')
+    b.classList.toggle('active', on)
+    b.textContent = on ? '开' : '关'
+  }))
+  $('rag-vp').addEventListener('input', () => { $('rag-vp-v').textContent = $('rag-vp').value + '%' })
+  $('rag-rp').addEventListener('input', () => { $('rag-rp-v').textContent = $('rag-rp').value + '%' })
+}
+
+// ── 保存编排：即时生效 + 写回 .env ──
+async function saveRagConfig() {
+  const el = $('rag-orchestrate')
+  const strat = [...el.querySelectorAll('.strat-btn.active')].map(b => b.dataset.ch)
+  const modeBtn = el.querySelector('.mode-btn.active')
+  const body = {
+    strategy: strat,
+    toolsEnabled: modeBtn ? modeBtn.dataset.mode === 'true' : false,
+    vecProb: Number($('rag-vp').value) / 100,
+    vecFallbackOnEmpty: $('rag-fallback').checked,
+    topK: Number($('rag-topk').value),
+    recallProb: Number($('rag-rp').value) / 100,
+    toolMaxIter: Number($('rag-maxiter').value),
+    toolMaxItems: Number($('rag-maxitems').value),
+    factMaxChars: Number($('rag-fact').value),
+  }
+  const btn = $('rag-save')
+  const note = $('rag-save-note')
+  btn.disabled = true
+  btn.textContent = '保存中…'
+  try {
+    const r = await fetch('/api/rag/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const res = await r.json()
+    note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
+    note.className = 'mt-2 text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
+    if (res.ok) await loadRagInfo()
+  } catch (e) {
+    note.textContent = '❌ ' + e.message
+    note.className = 'mt-2 text-xs text-red-400'
+  } finally {
+    btn.disabled = false
+    btn.textContent = '保存并生效'
   }
 }
+$('rag-save').addEventListener('click', () => { void saveRagConfig() })
 
 $('rag-go').addEventListener('click', async () => {
   const q = $('rag-q').value.trim()
@@ -674,12 +833,14 @@ $('log-clear').addEventListener('click', () => { $('log-box').innerHTML = ''; lo
 // ── 初始化 ──
 loadConfig()
 loadPresets()
-loadKbMeta()
+void loadRagInfo()
 loadModels()
+void loadThreadOverview()
 window.testModel = testModel
 window.switchModel = switchModel
 $('model-refresh')?.addEventListener('click', () => { void loadModels() })
 $('model-check')?.addEventListener('click', () => { void loadHealth() })
+$('ov-goto-chat')?.addEventListener('click', () => { document.querySelector('.side-item[data-page="chat"]')?.click() })
 setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }, 1000)
 
 // 首次状态（SSE 会推，兜底拉一次）

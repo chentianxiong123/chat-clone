@@ -4,7 +4,7 @@ import { join, extname, normalize } from 'node:path'
 import { AgentCore } from './core.js'
 import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'
-import { ragSearch, ragStatus, searchRag } from './rag.js'
+import { ragImportInfo, ragSearch, ragStatus, searchRag } from './rag.js'
 import { buildSystemPrompt, buildStyleHintMessage } from './prompt.js'
 import { callLlmRaw, listModels, healthCheckAll } from './llm.js'
 import { getUsageSummary } from './stats.js'
@@ -140,7 +140,15 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       // ── v2 控制台：线程列表 ──
       if (path === '/api/v2/threads') {
         if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
-        return json(res, 200, { threads: v2.getThreads(), snapshot: v2.getSnapshot() })
+        const { threads, counts } = v2.getThreadsWithCounts()
+        const withCounts = threads.map(t => ({ ...t, messageCount: counts[t.id] || 0 }))
+        const active = threads.filter(t => !t.archived)
+        const totalMessages = withCounts.reduce((a, t) => a + t.messageCount, 0)
+        return json(res, 200, {
+          threads: withCounts,
+          snapshot: v2.getSnapshot(),
+          totals: { threads: active.length, messages: totalMessages, archived: threads.length - active.length },
+        })
       }
 
       // ── v2 控制台：新建/确保模拟会话（真群号一律拒绝）──
@@ -273,6 +281,74 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         if (!q) return json(res, 400, { error: 'missing q' })
         const result = await ragSearch(q)
         return json(res, 200, { q, ...result })
+      }
+
+      // ── RAG 信息（状态 + 配置 + 导入情况）──
+      if (path === '/api/rag/info') {
+        const [status, importInfo] = await Promise.all([ragStatus(), ragImportInfo()])
+        return json(res, 200, { status, import: importInfo, config: buildRagConfig() })
+      }
+
+      // ── 保存 RAG 编排：即时生效 + 写回 .env ──
+      if (path === '/api/rag/config' && req.method === 'POST') {
+        const body = await readBody(req)
+        const patch: Record<string, string> = {}
+        const applied: string[] = []
+
+        if (Array.isArray(body.strategy)) {
+          const v = (body.strategy as string[])
+            .map(s => String(s).trim()).filter(s => s === 'vec' || s === 'fts' || s === 'like')
+          const seen = new Set(v); const uniq = [...seen]
+          if (uniq.length) { config.rag.strategy = uniq; applied.push('strategy'); patch.RAG_STRATEGY = uniq.join(',') }
+        }
+        if (body.topK != null) {
+          const v = Math.max(1, Math.min(50, Math.round(Number(body.topK))))
+          config.rag.topK = v; applied.push('topK'); patch.RAG_TOP_K = String(v)
+        }
+        if (body.vecProb != null) {
+          const v = Math.max(0, Math.min(1, Number(body.vecProb)))
+          config.rag.vecProb = v; applied.push('vecProb'); patch.RAG_VEC_PROB = String(v)
+        }
+        if (typeof body.vecFallbackOnEmpty === 'boolean') {
+          config.rag.vecFallbackOnEmpty = body.vecFallbackOnEmpty
+          applied.push('vecFallbackOnEmpty'); patch.RAG_VEC_FALLBACK = String(body.vecFallbackOnEmpty)
+        }
+        if (typeof body.embedEnabled === 'boolean') {
+          config.rag.embedEnabled = body.embedEnabled
+          applied.push('embedEnabled'); patch.RAG_EMBED_ENABLED = String(body.embedEnabled)
+        }
+        if (typeof body.toolsEnabled === 'boolean') {
+          config.rag.toolsEnabled = body.toolsEnabled
+          applied.push('toolsEnabled'); patch.RAG_TOOLS_ENABLED = String(body.toolsEnabled)
+        }
+        if (body.recallProb != null) {
+          const v = Math.max(0, Math.min(1, Number(body.recallProb)))
+          config.rag.recallProb = v; applied.push('recallProb'); patch.RAG_RECALL_PROB = String(v)
+        }
+        if (body.toolMaxIter != null) {
+          const v = Math.max(1, Math.round(Number(body.toolMaxIter)))
+          config.rag.toolMaxIter = v; applied.push('toolMaxIter'); patch.RAG_TOOL_MAX_ITER = String(v)
+        }
+        if (body.toolMaxItems != null) {
+          const v = Math.max(1, Math.round(Number(body.toolMaxItems)))
+          config.rag.toolMaxItems = v; applied.push('toolMaxItems'); patch.RAG_TOOL_MAX_ITEMS = String(v)
+        }
+        if (body.factMaxChars != null) {
+          const v = Math.max(10, Math.round(Number(body.factMaxChars)))
+          config.rag.factMaxChars = v; applied.push('factMaxChars'); patch.MEMORY_FACT_MAX_CHARS = String(v)
+        }
+
+        if (Object.keys(patch).length) {
+          const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+          writeEnvWithBackup(applyEnvPatch(raw, patch))
+        }
+        return json(res, 200, {
+          ok: true,
+          note: applied.length ? `已即时生效：${applied.join('、')}（已写回 .env）` : '无变更',
+          applied,
+          config: buildRagConfig(),
+          rag: await ragStatus(),
+        })
       }
 
       // ── RAG / LLM 能力状态 ──
@@ -559,6 +635,29 @@ function readBody(req: { on: (e: 'data' | 'end', cb: (c?: unknown) => void) => v
 
 function writeFileSyncSafe(path: string, content: string): void {
   writeFileSync(path, content, 'utf8')
+}
+
+/** 当前 RAG 编排配置快照（供前端表单回填） */
+function buildRagConfig() {
+  return {
+    dbPath: config.rag.dbPath,
+    vec0: config.rag.vec0,
+    embedEndpoint: config.rag.embedEndpoint,
+    embedModel: config.rag.embedModel,
+    embedProxy: config.rag.embedProxy,
+    embedEnabled: config.rag.embedEnabled,
+    ftsEnabled: config.rag.ftsEnabled,
+    likeEnabled: config.rag.likeEnabled,
+    topK: config.rag.topK,
+    strategy: config.rag.strategy,
+    vecProb: config.rag.vecProb,
+    vecFallbackOnEmpty: config.rag.vecFallbackOnEmpty,
+    toolsEnabled: config.rag.toolsEnabled,
+    recallProb: config.rag.recallProb,
+    toolMaxIter: config.rag.toolMaxIter,
+    toolMaxItems: config.rag.toolMaxItems,
+    factMaxChars: config.rag.factMaxChars,
+  }
 }
 
 /** 把 patch 合并进 .env：更新所有同名活跃行（保留行内注释），缺失的追加到末尾 */

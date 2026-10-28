@@ -74,11 +74,42 @@ async function loadThreads() {
 }
 
 function threadLabel(t) {
-  return `${t.kind === 'group' ? '群聊' : '私聊'} ${t.externalId}`
+  if (t.channel === 'qq') return `真群 ${t.externalId}`
+  return `${t.kind === 'group' ? '模拟群' : '模拟私聊'} ${t.externalId}`
 }
 
 function threadBadge(t) {
-  return [t.archived ? '已归档' : '', t.channel === 'sim' ? '' : '只读'].filter(Boolean).join(' · ')
+  return [t.archived ? '已归档' : ''].filter(Boolean).join(' · ')
+}
+
+function threadRow(t) {
+  const btn = document.createElement('button')
+  btn.className = `w-full text-left rounded-xl border px-3 py-2.5 transition ${t.id === S.active ? 'thread-active' : 'border-transparent hover:bg-white/5'} ${t.archived ? 'thread-archived' : ''}`
+  btn.onclick = () => openThread(t.id)
+  btn.innerHTML = `
+    <div class="flex items-center gap-2">
+      <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold ${t.channel === 'qq' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-white/5 text-slate-300'}">${t.channel === 'qq' ? '真' : (t.kind === 'group' ? '群' : '私')}</span>
+      <span class="min-w-0 flex-1">
+        <span class="flex items-center gap-1.5">
+          <span class="text-[12px] font-medium truncate ${t.channel === 'qq' ? 'text-indigo-200' : 'text-slate-200'}">${esc(threadLabel(t))}</span>
+          ${t.archived ? '<span class="pill bg-white/5 text-slate-500">归档</span>' : ''}
+          ${t.paused ? '<span class="pill bg-amber-500/15 text-amber-300">暂停</span>' : ''}
+        </span>
+        <span class="block text-[10px] text-slate-500 truncate mt-0.5">${esc(short(t.lastPreview || '（暂无消息）', 42))}</span>
+      </span>
+      <span class="shrink-0 text-right">
+        <span class="block text-[9px] text-slate-600">${fmtTime(t.lastMessageAt)}</span>
+        ${t.unread ? `<span class="mt-1 inline-block min-w-4 h-4 px-1 rounded-full bg-indigo-500 text-white text-[9px] leading-4 text-center">${t.unread > 99 ? '99+' : t.unread}</span>` : ''}
+      </span>
+    </div>`
+  return btn
+}
+
+function sectionHead(label, cls) {
+  const div = document.createElement('div')
+  div.className = `px-2 pt-3 pb-1 text-[10px] uppercase tracking-widest font-semibold ${cls}`
+  div.textContent = label
+  return div
 }
 
 function renderThreads() {
@@ -88,27 +119,23 @@ function renderThreads() {
     box.innerHTML = `<div class="p-3 text-[11px] text-slate-600">还没有会话，点上方新建。</div>`
     return
   }
-  for (const t of S.threads) {
-    const btn = document.createElement('button')
-    btn.className = `w-full text-left rounded-xl border px-3 py-2.5 transition ${t.id === S.active ? 'thread-active' : 'border-transparent hover:bg-white/5'} ${t.archived ? 'thread-archived' : ''}`
-    btn.onclick = () => openThread(t.id)
-    btn.innerHTML = `
-      <div class="flex items-center gap-2">
-        <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold bg-white/5 text-slate-300">${t.kind === 'group' ? '群' : '私'}</span>
-        <span class="min-w-0 flex-1">
-          <span class="flex items-center gap-1.5">
-            <span class="text-[12px] font-medium truncate text-slate-200">${esc(threadLabel(t))}</span>
-            ${t.archived ? '<span class="pill bg-white/5 text-slate-500">归档</span>' : ''}
-            ${t.paused ? '<span class="pill bg-amber-500/15 text-amber-300">暂停</span>' : ''}
-          </span>
-          <span class="block text-[10px] text-slate-500 truncate mt-0.5">${esc(short(t.lastPreview || '（暂无消息）', 42))}</span>
-        </span>
-        <span class="shrink-0 text-right">
-          <span class="block text-[9px] text-slate-600">${fmtTime(t.lastMessageAt)}</span>
-          ${t.unread ? `<span class="mt-1 inline-block min-w-4 h-4 px-1 rounded-full bg-indigo-500 text-white text-[9px] leading-4 text-center">${t.unread > 99 ? '99+' : t.unread}</span>` : ''}
-        </span>
-      </div>`
-    box.appendChild(btn)
+  const real = S.threads.filter(t => t.channel === 'qq')
+  const sims = S.threads.filter(t => t.channel === 'sim')
+  const arch = S.threads.filter(t => t.archived)
+  // 真群分区
+  if (real.length) {
+    box.appendChild(sectionHead('真群', 'text-indigo-400'))
+    for (const t of real) box.appendChild(threadRow(t))
+  }
+  // 模拟群分区（未归档）
+  if (sims.some(t => !t.archived)) {
+    box.appendChild(sectionHead('模拟群', 'text-slate-500'))
+    for (const t of sims) if (!t.archived) box.appendChild(threadRow(t))
+  }
+  // 已归档分区
+  if (arch.length) {
+    box.appendChild(sectionHead('已归档', 'text-slate-600'))
+    for (const t of arch) box.appendChild(threadRow(t))
   }
 }
 
@@ -160,7 +187,7 @@ function renderHeader() {
   badge.classList.toggle('hidden', !badgeText)
   paused.classList.toggle('hidden', !t.paused)
   sub.textContent = ''
-  const writable = t.channel === 'sim' && !t.archived
+  const writable = !t.archived
   for (const b of [trigger, pause, send, composer, sender, atBot, policy]) b.disabled = !writable
   archive.disabled = false
   archive.textContent = t.archived ? '恢复' : '归档'
@@ -171,7 +198,7 @@ function renderHeader() {
 function updateHint() {
   const t = S.detail?.meta
   if (!t) return
-  const writable = t.channel === 'sim' && !t.archived
+  const writable = !t.archived
   const policy = $('policy')?.checked
   const b = S.snapshot?.batch
   const hint = $('composer-hint')
@@ -387,7 +414,7 @@ async function refreshInspector() {
 async function send() {
   if (!S.active || S.sending) return
   const t = S.detail?.meta
-  if (!t || t.channel !== 'sim') return
+  if (!t || t.archived) return
   const text = $('composer').value.trim()
   if (!text) return
   S.sending = true
@@ -478,7 +505,7 @@ async function createFromDialog() {
 
 async function trigger() {
   const t = S.detail?.meta
-  if (!S.active || t?.channel !== 'sim' || t.archived) return
+  if (!S.active || t?.archived) return
   try {
     await api(`/api/v2/thread/${encodeURIComponent(S.active)}/trigger`, { method: 'POST', body: '{}' })
     await openThread(S.active)
@@ -487,7 +514,7 @@ async function trigger() {
 
 async function togglePause() {
   const t = S.detail?.meta
-  if (!t || t.channel !== 'sim' || t.archived) return
+  if (!t || t.archived) return
   try {
     await api(`/api/v2/thread/${encodeURIComponent(S.active)}/pause`, {
       method: 'POST',
@@ -603,5 +630,11 @@ $('archive').onclick = toggleArchive
 for (const b of document.querySelectorAll('.insp-tab')) {
   b.onclick = () => { S.tab = b.dataset.tab; renderInspector() }
 }
+
+// 首页「活跃群」点击 → 跳到聊天页并打开该线程
+window.addEventListener('open-thread', (e) => {
+  const id = e.detail
+  if (id) void openThread(id)
+})
 
 boot()

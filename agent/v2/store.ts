@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { config } from '../config.js'
 import { loadDialog, listSceneSummaries } from '../memory.js'
 import {
   parseThreadKey, threadKey, threadTitle,
@@ -70,6 +71,39 @@ function openDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_tool_calls_run ON tool_calls(run_id, started_at);
   `)
   try { db.exec(`ALTER TABLE thread_meta ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+  // 迁移：唯一真群(SIM_REAL_GROUPS)→qq 通道(真群)，其余全部→sim 通道(模拟群)
+  // 仅在无子记录时改 id，保证 events/runs/tool_calls 引用不丢；幂等可重复执行
+  try {
+    const childCount = (id: string) => (db.prepare(
+      `SELECT (SELECT count(*) FROM events WHERE thread_id = ?) + (SELECT count(*) FROM runs WHERE thread_id = ?) n`,
+    ).get(id, id) as { n: number }).n
+    const exists = (id: string) => !!db.prepare(`SELECT 1 FROM thread_meta WHERE id = ?`).get(id)
+    const rows = db.prepare(`SELECT id, channel, kind, external_id FROM thread_meta`).all() as Array<{ id: string; channel: string; kind: string; external_id: number }>
+    for (const r of rows) {
+      const isReal = r.kind === 'group' && config.sim.realGroups.includes(r.external_id)
+      if (isReal) {
+        const newId = `g:${r.external_id}`
+        const title = `真群 ${r.external_id}`
+        if (r.id === newId) {
+          if (r.channel !== 'qq') db.prepare(`UPDATE thread_meta SET channel = 'qq', title = ? WHERE id = ?`).run(title, newId)
+        } else if (childCount(r.id) === 0) {
+          if (exists(newId)) db.prepare(`DELETE FROM thread_meta WHERE id = ?`).run(r.id)
+          else db.prepare(`UPDATE thread_meta SET id = ?, channel = 'qq', title = ? WHERE id = ?`).run(newId, title, r.id)
+        }
+      } else {
+        const newId = r.kind === 'group' ? `sim:g:${r.external_id}` : `sim:p:${r.external_id}`
+        const title = r.kind === 'group' ? `模拟群 ${r.external_id}` : `模拟私聊 ${r.external_id}`
+        if (r.id === newId) {
+          if (r.channel !== 'sim') db.prepare(`UPDATE thread_meta SET channel = 'sim', title = ? WHERE id = ?`).run(title, newId)
+        } else if (childCount(r.id) === 0) {
+          if (exists(newId)) db.prepare(`DELETE FROM thread_meta WHERE id = ?`).run(r.id)
+          else db.prepare(`UPDATE thread_meta SET id = ?, channel = 'sim', title = ? WHERE id = ?`).run(newId, title, r.id)
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[v2] 迁移真群/模拟群失败:', (e as Error).message)
+  }
   _db = db
   return db
 }
@@ -144,17 +178,35 @@ export function listThreads(): ThreadMeta[] {
   return rows.map(rowToMeta)
 }
 
+// 每个线程的消息数（events 里 message.received + assistant.message 计数）
+export function threadMessageCounts(): Record<string, number> {
+  const db = openDb()
+  const rows = db.prepare(`
+    SELECT thread_id, count(*) n FROM events
+    WHERE type IN ('message.received', 'assistant.message')
+    GROUP BY thread_id
+  `).all() as Array<{ thread_id: string; n: number }>
+  const out: Record<string, number> = {}
+  for (const r of rows) out[r.thread_id] = r.n
+  return out
+}
+
 function seedFromMemory(): void {
   if (seeded) return
   seeded = true
   for (const s of listSceneSummaries()) {
-    const ref = parseThreadKey(s.key)
+    let ref = parseThreadKey(s.key)
     if (!ref) continue
+    // 唯一真群 → qq 通道；其余 → sim 通道（模拟群）
+    const isReal = ref.kind === 'group' && config.sim.realGroups.includes(ref.externalId)
+    if (isReal && ref.channel !== 'qq') ref = { channel: 'qq', kind: ref.kind, externalId: ref.externalId }
+    else if (!isReal && ref.channel !== 'sim') ref = { channel: 'sim', kind: ref.kind, externalId: ref.externalId }
     ensureThread(ref)
     const db = openDb()
+    const key = threadKey(ref)
     const preview = s.summary ? s.summary.replace(/\s+/g, ' ').slice(0, 160) : ''
     db.prepare(`UPDATE thread_meta SET updated_at = ?, last_message_at = ?, last_preview = ? WHERE id = ? AND last_preview = ''`)
-      .run(s.updatedAt, s.updatedAt, preview, s.key)
+      .run(s.updatedAt, s.updatedAt, preview, key)
   }
 }
 
