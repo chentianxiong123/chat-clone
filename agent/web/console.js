@@ -11,7 +11,7 @@ const S = {
   sending: false,
   status: null,
   snapshot: null,
-  showQQ: false,
+  newKind: 'group',
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -30,6 +30,11 @@ const fmtDur = (ms) => {
 const short = (s, n = 80) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()
   return t.length > n ? t.slice(0, n) + '…' : t
+}
+const fmtNum = (n) => Number(n || 0).toLocaleString('zh-CN')
+const tokenLine = (tokensIn, tokensOut, cost) => {
+  if (!tokensIn && !tokensOut) return ''
+  return `Token ${fmtNum(tokensIn)} 输入 / ${fmtNum(tokensOut)} 输出${cost ? ` · ￥${Number(cost).toFixed(4)}` : ''}`
 }
 const personaName = () => S.status?.persona?.name || 'Agent'
 
@@ -68,29 +73,32 @@ async function loadThreads() {
   }
 }
 
+function threadLabel(t) {
+  return `${t.kind === 'group' ? '群聊' : '私聊'} ${t.externalId}`
+}
+
 function threadBadge(t) {
-  return t.channel === 'sim' ? '' : '只读'
+  return [t.archived ? '已归档' : '', t.channel === 'sim' ? '' : '只读'].filter(Boolean).join(' · ')
 }
 
 function renderThreads() {
   const box = $('threads')
   box.innerHTML = ''
-  const visible = S.showQQ ? S.threads : S.threads.filter(t => t.channel === 'sim')
-  if (!visible.length) {
+  if (!S.threads.length) {
     box.innerHTML = `<div class="p-3 text-[11px] text-slate-600">还没有会话，点上方新建。</div>`
     return
   }
-  for (const t of visible) {
+  for (const t of S.threads) {
     const btn = document.createElement('button')
-    btn.className = `w-full text-left rounded-xl border px-3 py-2.5 transition ${t.id === S.active ? 'thread-active' : 'border-transparent hover:bg-white/5'}`
+    btn.className = `w-full text-left rounded-xl border px-3 py-2.5 transition ${t.id === S.active ? 'thread-active' : 'border-transparent hover:bg-white/5'} ${t.archived ? 'thread-archived' : ''}`
     btn.onclick = () => openThread(t.id)
-    const sim = t.channel === 'sim'
     btn.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold ${sim ? 'bg-indigo-500/20 text-indigo-200' : 'bg-white/5 text-slate-400'}">${t.kind === 'group' ? '群' : '私'}</span>
+        <span class="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-[10px] font-bold bg-white/5 text-slate-300">${t.kind === 'group' ? '群' : '私'}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-1.5">
-            <span class="text-[12px] font-medium truncate ${sim ? 'text-slate-200' : 'text-slate-400'}">${esc(t.title)}</span>
+            <span class="text-[12px] font-medium truncate text-slate-200">${esc(threadLabel(t))}</span>
+            ${t.archived ? '<span class="pill bg-white/5 text-slate-500">归档</span>' : ''}
             ${t.paused ? '<span class="pill bg-amber-500/15 text-amber-300">暂停</span>' : ''}
           </span>
           <span class="block text-[10px] text-slate-500 truncate mt-0.5">${esc(short(t.lastPreview || '（暂无消息）', 42))}</span>
@@ -131,7 +139,7 @@ function renderHeader() {
   const paused = $('thread-paused')
   const trigger = $('trigger')
   const pause = $('pause')
-  const clear = $('clear')
+  const archive = $('archive')
   const composer = $('composer')
   const send = $('send')
   const sender = $('sender')
@@ -142,18 +150,20 @@ function renderHeader() {
     badge.classList.add('hidden')
     paused.classList.add('hidden')
     sub.textContent = ''
-    for (const b of [trigger, pause, clear, send, composer, sender, atBot, policy]) b.disabled = true
+    for (const b of [trigger, pause, archive, send, composer, sender, atBot, policy]) b.disabled = true
     return
   }
-  title.textContent = t.title
+  title.textContent = threadLabel(t)
   const badgeText = threadBadge(t)
   badge.textContent = badgeText
   badge.className = 'pill bg-white/5 text-slate-400 border border-white/10'
   badge.classList.toggle('hidden', !badgeText)
   paused.classList.toggle('hidden', !t.paused)
   sub.textContent = ''
-  const sim = t.channel === 'sim'
-  for (const b of [trigger, pause, clear, send, composer, sender, atBot, policy]) b.disabled = !sim
+  const writable = t.channel === 'sim' && !t.archived
+  for (const b of [trigger, pause, send, composer, sender, atBot, policy]) b.disabled = !writable
+  archive.disabled = false
+  archive.textContent = t.archived ? '恢复' : '归档'
   pause.textContent = t.paused ? '恢复' : '暂停'
   updateHint()
 }
@@ -161,11 +171,11 @@ function renderHeader() {
 function updateHint() {
   const t = S.detail?.meta
   if (!t) return
-  const sim = t.channel === 'sim'
+  const writable = t.channel === 'sim' && !t.archived
   const policy = $('policy')?.checked
   const b = S.snapshot?.batch
   const hint = $('composer-hint')
-  if (!sim || !policy) {
+  if (!writable || !policy) {
     hint.textContent = ''
     hint.classList.add('hidden')
     return
@@ -296,7 +306,10 @@ function renderRuns(box) {
         <span class="ml-auto text-[10px] text-slate-600">${fmtDur((r.endedAt || r.startedAt) - r.startedAt)}</span>
       </div>
       <div class="mt-1 text-[11px] text-slate-300">${esc(short(r.reply || r.error || '（无文本）', 120))}</div>
-      <div class="mt-1 text-[9px] text-slate-600">${fmtTime(r.startedAt)}</div>`
+      <div class="mt-1 flex items-center gap-2 text-[9px] text-slate-600">
+        <span>${fmtTime(r.startedAt)}</span>
+        ${tokenLine(r.tokensIn, r.tokensOut, r.cost) ? `<span class="ml-auto">${tokenLine(r.tokensIn, r.tokensOut, r.cost)}</span>` : ''}
+      </div>`
     box.appendChild(div)
   }
 }
@@ -336,14 +349,19 @@ function renderContext(box) {
   const provider = String(S.status?.llm?.provider || '')
   const providerName = provider.replace(/\s*\(.*?\)\s*/g, '').trim()
   const model = /agnes/i.test(provider) ? 'Agnes 2.5（本地）' : (providerName || S.status?.llm?.model || '未知模型')
+  const totalIn = (d.runs || []).reduce((n, r) => n + Number(r.tokensIn || 0), 0)
+  const totalOut = (d.runs || []).reduce((n, r) => n + Number(r.tokensOut || 0), 0)
+  const totalCost = (d.runs || []).reduce((n, r) => n + Number(r.cost || 0), 0)
+  const totalTokens = tokenLine(totalIn, totalOut, totalCost)
   box.innerHTML = `
     <div class="rounded-xl border border-white/5 bg-white/[0.02] p-3">
       <div class="text-[10px] text-slate-500">会话</div>
-      <div class="mt-1 text-[12px] text-slate-200">${esc(t.title)}</div>
+      <div class="mt-1 text-[12px] text-slate-200">${esc(threadLabel(t))}</div>
       <div class="mt-2 grid grid-cols-2 gap-2 text-[10px]">
         <div><span class="text-slate-600">消息</span><div class="text-slate-300">${d.dialog?.length || 0} 条</div></div>
         <div><span class="text-slate-600">未读</span><div class="text-slate-300">${t.unread} 条</div></div>
       </div>
+      ${totalTokens ? `<div class="mt-2 text-[10px] text-slate-500">${esc(totalTokens)}</div>` : ''}
     </div>
     <div class="mt-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
       <div class="text-[10px] text-slate-500">模型</div>
@@ -397,38 +415,70 @@ async function send() {
   }
 }
 
-async function newSimGroup(id, silent) {
-  let groupId = id
-  if (groupId === undefined && !silent) {
-    const raw = prompt('模拟群号（900000–999999）', String(S.snapshot?.sim?.defaultGroup || 900001))
-    if (raw === null) return
-    groupId = Number(raw)
-  }
+async function newSimThread(kind, id, silent = false) {
   try {
     const j = await api('/api/v2/threads/sim', {
       method: 'POST',
-      body: JSON.stringify({ kind: 'group', id: groupId }),
+      body: JSON.stringify({ kind, id }),
     })
     await loadThreads()
     await openThread(j.thread.id)
-  } catch (e) { alert(e.message) }
+    return true
+  } catch (e) {
+    if (!silent) alert(e.message)
+    return false
+  }
 }
 
-async function newSimPrivate() {
-  const raw = prompt('模拟私聊号', '10001')
-  if (raw === null) return
-  try {
-    const j = await api('/api/v2/threads/sim', {
-      method: 'POST',
-      body: JSON.stringify({ kind: 'private', id: Number(raw) }),
-    })
-    await loadThreads()
-    await openThread(j.thread.id)
-  } catch (e) { alert(e.message) }
+async function newSimGroup(id, silent) {
+  return newSimThread('group', id, silent)
+}
+
+function setNewKind(kind) {
+  S.newKind = kind
+  for (const b of document.querySelectorAll('.new-kind')) {
+    b.classList.toggle('kind-active', b.dataset.kind === kind)
+  }
+  const id = $('new-id')
+  id.value = kind === 'group'
+    ? String(S.snapshot?.sim?.defaultGroup || 900001)
+    : '10001'
+  id.placeholder = kind === 'group' ? '群号' : '私聊号'
+  $('new-error').textContent = ''
+}
+
+function openNewDialog() {
+  setNewKind('group')
+  $('new-dialog').hidden = false
+  $('new-id').focus()
+  $('new-id').select()
+}
+
+function closeNewDialog() {
+  $('new-dialog').hidden = true
+}
+
+async function createFromDialog() {
+  const id = Number($('new-id').value.trim())
+  if (!Number.isInteger(id) || id <= 0) {
+    $('new-error').textContent = '请输入有效号码。'
+    return
+  }
+  if (S.newKind === 'group') {
+    const min = S.snapshot?.sim?.groupMin ?? 900000
+    const max = S.snapshot?.sim?.groupMax ?? 999999
+    if (id < min || id > max) {
+      $('new-error').textContent = `群号需在 ${min}–${max}。`
+      return
+    }
+  }
+  $('new-error').textContent = ''
+  if (await newSimThread(S.newKind, id)) closeNewDialog()
 }
 
 async function trigger() {
-  if (!S.active || S.detail?.meta?.channel !== 'sim') return
+  const t = S.detail?.meta
+  if (!S.active || t?.channel !== 'sim' || t.archived) return
   try {
     await api(`/api/v2/thread/${encodeURIComponent(S.active)}/trigger`, { method: 'POST', body: '{}' })
     await openThread(S.active)
@@ -437,7 +487,7 @@ async function trigger() {
 
 async function togglePause() {
   const t = S.detail?.meta
-  if (!t || t.channel !== 'sim') return
+  if (!t || t.channel !== 'sim' || t.archived) return
   try {
     await api(`/api/v2/thread/${encodeURIComponent(S.active)}/pause`, {
       method: 'POST',
@@ -447,12 +497,14 @@ async function togglePause() {
   } catch (e) { alert(e.message) }
 }
 
-async function clearThread() {
+async function toggleArchive() {
   const t = S.detail?.meta
-  if (!t || t.channel !== 'sim') return
-  if (!confirm(`清空 ${t.title} 的对话记忆？`)) return
+  if (!t) return
   try {
-    await api(`/api/v2/thread/${encodeURIComponent(S.active)}/clear`, { method: 'POST', body: '{}' })
+    await api(`/api/v2/thread/${encodeURIComponent(S.active)}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ archived: !t.archived }),
+    })
     await openThread(S.active)
   } catch (e) { alert(e.message) }
 }
@@ -531,13 +583,23 @@ $('send').onclick = send
 $('composer').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
 })
-$('show-qq').onchange = (e) => { S.showQQ = e.target.checked; renderThreads() }
 $('policy').onchange = updateHint
-$('new-group').onclick = () => newSimGroup()
-$('new-private').onclick = newSimPrivate
+$('new-thread').onclick = openNewDialog
+$('new-cancel').onclick = closeNewDialog
+$('new-create').onclick = createFromDialog
+$('new-id').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); createFromDialog() }
+  if (e.key === 'Escape') closeNewDialog()
+})
+$('new-dialog').addEventListener('click', (e) => {
+  if (e.target === $('new-dialog')) closeNewDialog()
+})
+for (const b of document.querySelectorAll('.new-kind')) {
+  b.onclick = () => setNewKind(b.dataset.kind)
+}
 $('trigger').onclick = trigger
 $('pause').onclick = togglePause
-$('clear').onclick = clearThread
+$('archive').onclick = toggleArchive
 for (const b of document.querySelectorAll('.insp-tab')) {
   b.onclick = () => { S.tab = b.dataset.tab; renderInspector() }
 }

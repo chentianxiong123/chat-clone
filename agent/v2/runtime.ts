@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import { callLlm, callLlmWithTools, type ChatMessage } from '../llm.js'
+import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm.js'
 import { buildSystemPrompt, buildStyleHintMessage, buildMemoryHintMessage } from '../prompt.js'
 import { searchRag } from '../rag.js'
 import { needsRecall, searchMemoryNote } from '../tools.js'
@@ -89,6 +89,9 @@ export class AgentRuntime {
     let reply = ''
     let toolCalls = 0
     let providerId = ''
+    let tokensIn = 0
+    let tokensOut = 0
+    let cost = 0
 
     try {
       const ctx = req.messages.map(m => `${m.senderNick}: ${m.text}`).join('\n')
@@ -183,9 +186,12 @@ export class AgentRuntime {
             onToolStart,
             onTool,
           })
-        : { text: await callLlm(messages), providerId: '', toolCalls: 0 }
+        : await callLlmWithProviders(messages)
       providerId = llm.providerId
-      toolCalls = llm.toolCalls
+      toolCalls = llm.toolCalls ?? 0
+      tokensIn = llm.tokensIn ?? 0
+      tokensOut = llm.tokensOut ?? 0
+      cost = llm.cost ?? 0
       const raw = llm.text
       if (!raw && !tools.context.sentByTool) {
         console.log(`[V2] ${key} LLM 无回复，跳过`)
@@ -246,6 +252,9 @@ export class AgentRuntime {
       rec.error = error
       rec.reply = reply || undefined
       rec.toolCalls = toolCalls
+      rec.tokensIn = tokensIn
+      rec.tokensOut = tokensOut
+      rec.cost = cost
       finishRun(rec)
       this.emit({
         type: 'run.finished', thread: key, runId, status,

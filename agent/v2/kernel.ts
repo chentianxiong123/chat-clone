@@ -66,8 +66,8 @@ export class AgentKernel {
     return this.harness.setPaused(id, paused)
   }
 
-  clearThread(id: string): void {
-    this.harness.clearThread(id)
+  archiveThread(id: string, archived: boolean): ThreadMeta | null {
+    return this.harness.archiveThread(id, archived)
   }
 
   createSimThread(kind: 'group' | 'private', id?: number): ThreadMeta {

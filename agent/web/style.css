@@ -131,8 +131,14 @@ table.table td { color: #cbd5e1; }
 .typing-dot:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
 .thread-active { background: rgba(99,102,241,.14); border-color: rgba(129,140,248,.35); }
+.thread-archived { opacity: .55; }
 .tab-active { color: #c7d2fe; border-color: #818cf8; background: rgba(99,102,241,.12); }
 .pill { font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 999px; }
+.new-dialog-mask { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; background: rgba(2,6,23,.72); backdrop-filter: blur(4px); }
+.new-dialog-mask[hidden] { display: none; }
+.new-dialog { width: min(380px, 100%); border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: #0d1220; padding: 20px; box-shadow: 0 24px 80px rgba(0,0,0,.5); }
+.new-kind { height: 38px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: #cbd5e1; font-size: 12px; }
+.new-kind.kind-active { border-color: rgba(129,140,248,.5); background: rgba(99,102,241,.16); color: #c7d2fe; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 @media (max-width: 1200px) { .v2-chat .v2-inspector { display: none; } }
 @media (max-width: 900px) { .v2-chat .v2-threads { display: none; } }

@@ -1,9 +1,8 @@
 import { config } from '../config.js'
-import { clearDialogDb } from '../memory.js'
 import type { EventBus } from './bus.js'
 import type { AgentRuntime } from './runtime.js'
 import {
-  appendEvent, ensureThread, getThreadDetail, listEvents, listThreads, markRead, setPaused,
+  appendEvent, ensureThread, getThreadDetail, listEvents, listThreads, markRead, setArchived, setPaused,
   touchThread,
 } from './store.js'
 import {
@@ -216,12 +215,13 @@ export class Harness {
     return meta
   }
 
-  clearThread(id: string): void {
-    clearDialogDb(id)
-    this.pending.delete(id)
+  archiveThread(id: string, archived: boolean): ThreadMeta | null {
     const t = this.timers.get(id)
     if (t) { clearTimeout(t); this.timers.delete(id) }
-    this.emitStored({ type: 'thread.updated', thread: id, at: Date.now() })
+    this.pending.delete(id)
+    const meta = setArchived(id, archived)
+    if (meta) this.emitStored({ type: 'thread.updated', thread: id, at: Date.now() })
+    return meta
   }
 
   createSimThread(kind: 'group' | 'private', id?: number): ThreadMeta {

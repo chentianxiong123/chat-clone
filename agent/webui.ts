@@ -160,7 +160,7 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       }
 
       // ── v2 控制台：线程详情 ──
-      if (path.startsWith('/api/v2/thread/') && !path.endsWith('/message') && !path.endsWith('/pause') && !path.endsWith('/clear') && !path.endsWith('/trigger')) {
+      if (path.startsWith('/api/v2/thread/') && !path.endsWith('/message') && !path.endsWith('/pause') && !path.endsWith('/archive') && !path.endsWith('/trigger')) {
         if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
         const id = path.slice('/api/v2/thread/'.length)
         if (!v2.parseThread(id)) return json(res, 400, { error: 'bad thread id' })
@@ -225,13 +225,15 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { ok: true, thread: meta })
       }
 
-      // ── v2 控制台：清空会话 ──
-      if (path.startsWith('/api/v2/thread/') && path.endsWith('/clear') && req.method === 'POST') {
+      // ── v2 控制台：归档/恢复会话（保留全部消息、run、token 与工具记录）──
+      if (path.startsWith('/api/v2/thread/') && path.endsWith('/archive') && req.method === 'POST') {
         if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
-        const id = path.slice('/api/v2/thread/'.length, -'/clear'.length)
+        const id = path.slice('/api/v2/thread/'.length, -'/archive'.length)
         if (!v2.parseThread(id)) return json(res, 400, { error: 'bad thread id' })
-        v2.clearThread(id)
-        return json(res, 200, { ok: true })
+        const body = await readBody(req)
+        const meta = v2.archiveThread(id, !!body.archived)
+        if (!meta) return json(res, 404, { error: 'thread not found' })
+        return json(res, 200, { ok: true, thread: meta })
       }
 
       // ── v2 控制台：事件回放 ──
@@ -415,12 +417,9 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { ok: true })
       }
 
-      // ── 清空会话记忆 ──
+      // ── 删除会话记忆已禁用：历史、run 与 token 记录一律保留 ──
       if (path === '/api/clear' && req.method === 'POST') {
-        const body = await readBody(req)
-        const key = body.key ?? undefined
-        core.clearDialog(key)
-        return json(res, 200, { ok: true })
+        return json(res, 403, { error: '删除已禁用。请在聊天页归档会话，记录会完整保留。' })
       }
 
       // ── 预设模板列表 ──

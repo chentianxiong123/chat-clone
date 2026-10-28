@@ -78,12 +78,7 @@
       <div id="recent-state" class="glass round-2xl p-5 mt-4"></div>
 
       <div class="glass round-2xl p-5 mt-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">活跃群</div>
-          <div class="flex gap-2">
-            <button class="btn btn-xs btn-ghost text-error" id="ov-clear-all">清空全部记忆</button>
-          </div>
-        </div>
+        <div class="text-sm font-semibold mb-3">活跃群</div>
         <div id="group-list" class="space-y-3"></div>
       </div>
     </section>
@@ -95,20 +90,11 @@
 
           <!-- 会话列表 -->
           <aside class="v2-threads shrink-0 border-r border-white/5 bg-[#0d1220] flex flex-col">
-            <div class="px-4 pt-4 pb-3 border-b border-white/5">
+            <div class="px-4 pt-4 pb-3 border-b border-white/5 flex items-center justify-between gap-2">
               <div class="text-sm font-semibold tracking-wide">会话</div>
-              <div class="mt-3 grid grid-cols-2 gap-2">
-                <button id="new-group" class="h-8 rounded-lg bg-indigo-500/90 hover:bg-indigo-400 text-white text-xs font-medium">新建模拟群</button>
-                <button id="new-private" class="h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs">模拟私聊</button>
-              </div>
+              <button id="new-thread" class="h-8 px-3 rounded-lg bg-indigo-500/90 hover:bg-indigo-400 text-white text-xs font-medium">新建</button>
             </div>
-
-            <div class="px-4 py-2 flex items-center justify-end">
-              <label class="flex items-center gap-1.5 text-[10px] text-slate-500 select-none cursor-pointer">
-                <input id="show-qq" type="checkbox" class="accent-indigo-500"> 显示 QQ
-              </label>
-            </div>
-            <div id="threads" class="flex-1 overflow-y-auto px-2 pb-3 space-y-1"></div>
+            <div id="threads" class="flex-1 overflow-y-auto px-2 py-2 space-y-1"></div>
 
           </aside>
 
@@ -126,7 +112,7 @@
               <div class="flex items-center gap-2 shrink-0">
                 <button id="trigger" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 disabled:opacity-40">触发一轮</button>
                 <button id="pause" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 disabled:opacity-40">暂停</button>
-                <button id="clear" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-red-500/15 border border-white/10 hover:border-red-500/30 text-xs text-slate-300 hover:text-red-300 disabled:opacity-40">清空</button>
+                <button id="archive" class="h-8 px-3 rounded-lg bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 text-xs text-slate-300 hover:text-amber-200 disabled:opacity-40">归档</button>
               </div>
             </header>
 
@@ -165,11 +151,28 @@
                 <div class="p-2 border-b border-white/5 flex gap-1">
                   <button data-tab="runs" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">回复</button>
                   <button data-tab="tools" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">工具</button>
-                  <button data-tab="context" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">会话</button>
+                  <button data-tab="context" class="insp-tab flex-1 h-8 rounded-lg text-[11px] text-slate-400 hover:bg-white/5">详情</button>
                 </div>
                 <div id="inspector" class="flex-1 overflow-y-auto p-3 text-[11px]"></div>
               </aside>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="new-dialog" class="new-dialog-mask" hidden>
+        <div class="new-dialog">
+          <div class="text-sm font-semibold">新建会话</div>
+          <div class="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" class="new-kind kind-active" data-kind="group">群聊</button>
+            <button type="button" class="new-kind" data-kind="private">私聊</button>
+          </div>
+          <label class="block mt-4 text-[10px] text-slate-500" for="new-id">号码</label>
+          <input id="new-id" class="mt-1 h-9 w-full rounded-lg bg-white/5 border border-white/10 px-3 text-sm outline-none focus:border-indigo-400/50" inputmode="numeric" value="900001">
+          <div id="new-error" class="mt-2 text-[10px] text-red-300"></div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" id="new-cancel" class="h-9 px-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300">取消</button>
+            <button type="button" id="new-create" class="h-9 px-4 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-xs text-white font-medium">创建</button>
           </div>
         </div>
       </div>

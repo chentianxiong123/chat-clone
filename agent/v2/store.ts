@@ -30,7 +30,8 @@ function openDb(): DatabaseSync {
       last_message_at INTEGER NOT NULL,
       last_preview TEXT NOT NULL DEFAULT '',
       unread INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
+      paused INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +69,7 @@ function openDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_runs_thread ON runs(thread_id, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_run ON tool_calls(run_id, started_at);
   `)
+  try { db.exec(`ALTER TABLE thread_meta ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
   _db = db
   return db
 }
@@ -85,6 +87,7 @@ function rowToMeta(r: any): ThreadMeta {
     lastPreview: r.last_preview,
     unread: r.unread,
     paused: !!r.paused,
+    archived: !!r.archived,
   }
 }
 
@@ -130,9 +133,14 @@ export function setPaused(id: string, paused: boolean): void {
   openDb().prepare(`UPDATE thread_meta SET paused = ?, updated_at = ? WHERE id = ?`).run(paused ? 1 : 0, Date.now(), id)
 }
 
+export function setArchived(id: string, archived: boolean): ThreadMeta | null {
+  openDb().prepare(`UPDATE thread_meta SET archived = ?, updated_at = ? WHERE id = ?`).run(archived ? 1 : 0, Date.now(), id)
+  return getThreadMeta(id)
+}
+
 export function listThreads(): ThreadMeta[] {
   seedFromMemory()
-  const rows = openDb().prepare(`SELECT * FROM thread_meta ORDER BY last_message_at DESC, updated_at DESC`).all()
+  const rows = openDb().prepare(`SELECT * FROM thread_meta ORDER BY archived ASC, last_message_at DESC, updated_at DESC`).all()
   return rows.map(rowToMeta)
 }
 
@@ -155,7 +163,6 @@ export function appendEvent(ev: V2Event): void {
   const thread = 'thread' in ev ? ev.thread : null
   db.prepare(`INSERT INTO events(ts, type, thread_id, payload) VALUES (?, ?, ?, ?)`)
     .run(ev.at ?? Date.now(), ev.type, thread, JSON.stringify(ev))
-  db.prepare(`DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 8000)`).run()
 }
 
 export function listEvents(thread?: string, limit = 200): V2Event[] {

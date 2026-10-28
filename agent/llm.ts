@@ -34,15 +34,24 @@ interface ProviderHealth {
   error?: string
 }
 
+export interface LlmResult {
+  text: string
+  providerId: string
+  toolCalls?: number
+  tokensIn?: number
+  tokensOut?: number
+  cost?: number
+}
+
 /** 按活跃 → fallback 链顺序逐一尝试；记录每个 provider 的真实成本/成败 */
 export async function callLlmWithProviders(messages: ChatMessage[], opts: {
   maxTokens?: number
   temperature?: number
   attempts?: number
   onAttempt?: (p: ProviderSpec, ok: boolean, err?: string) => void
-} = {}): Promise<{ text: string; providerId: string }> {
+} = {}): Promise<LlmResult> {
   const active = getActiveProvider()
-  if (!active) return { text: '', providerId: '' }
+  if (!active) return { text: '', providerId: '', tokensIn: 0, tokensOut: 0, cost: 0 }
   const chain: ProviderSpec[] = [active]
   for (const fb of active.fallback ?? []) {
     const p = getProvider(fb)
@@ -83,7 +92,13 @@ export async function callLlmWithProviders(messages: ChatMessage[], opts: {
         })
         if (content) {
           opts.onAttempt?.(p, true, undefined)
-          return { text: content.trim(), providerId: p.id }
+          return {
+            text: content.trim(),
+            providerId: p.id,
+            tokensIn: usage?.prompt_tokens ?? 0,
+            tokensOut: usage?.completion_tokens ?? 0,
+            cost,
+          }
         }
         console.warn(`[LLM] ${p.id}/${p.model} 空响应，重试 ${attempt + 1}/${attempts}`)
         await sleep(config.llm.retryDelayMs)
@@ -96,7 +111,7 @@ export async function callLlmWithProviders(messages: ChatMessage[], opts: {
       }
     }
   }
-  return { text: '', providerId: chain[0]?.id ?? '' }
+  return { text: '', providerId: chain[0]?.id ?? '', tokensIn: 0, tokensOut: 0, cost: 0 }
 }
 
 export async function callLlm(messages: ChatMessage[]): Promise<string> {
@@ -136,9 +151,9 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
     durationMs: number
     startedAt: number
   }) => void
-}): Promise<{ text: string; providerId: string; toolCalls: number }> {
+}): Promise<LlmResult> {
   const active = getActiveProvider()
-  if (!active) return { text: '', providerId: '', toolCalls: 0 }
+  if (!active) return { text: '', providerId: '', toolCalls: 0, tokensIn: 0, tokensOut: 0, cost: 0 }
   const chain: ProviderSpec[] = [active]
   for (const fb of active.fallback ?? []) {
     const p = getProvider(fb)
@@ -149,6 +164,9 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
   const maxIter = Math.max(1, opts.maxIter ?? 2)
   const base = messages.map(m => ({ role: m.role, content: m.content }))
 
+  let tokensIn = 0
+  let tokensOut = 0
+  let cost = 0
   for (const p of chain) {
     const working: any[] = base.map(m => ({ ...m }))
     let toolCalls = 0
@@ -189,16 +207,21 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
       const cachedTokens = (usage as any)?.prompt_tokens_details?.cached_tokens
         ?? (usage as any)?.prompt_cache_hit_tokens ?? 0
       const price = priceFor(p)
-      const cost = (!price.in && !price.out) ? 0
-        : ((usage?.prompt_tokens ?? 0) / 1_000_000) * price.in + ((usage?.completion_tokens ?? 0) / 1_000_000) * price.out
+      const callTokensIn = usage?.prompt_tokens ?? 0
+      const callTokensOut = usage?.completion_tokens ?? 0
+      const callCost = (!price.in && !price.out) ? 0
+        : (callTokensIn / 1_000_000) * price.in + (callTokensOut / 1_000_000) * price.out
+      tokensIn += callTokensIn
+      tokensOut += callTokensOut
+      cost += callCost
       recordUsage({
         kind: 'llm',
         sub: `${p.id}/${p.model}`,
         ok: 1,
         fail: 0,
-        cost,
-        tokensIn: usage?.prompt_tokens ?? 0,
-        tokensOut: usage?.completion_tokens ?? 0,
+        cost: callCost,
+        tokensIn: callTokensIn,
+        tokensOut: callTokensOut,
         cachedTokens,
         ts: Date.now(),
         durationMs: Date.now() - t0,
@@ -231,13 +254,13 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
 
       if (content.trim()) {
         opts.onAttempt?.(p, true, undefined)
-        return { text: content.trim(), providerId: p.id, toolCalls }
+        return { text: content.trim(), providerId: p.id, toolCalls, tokensIn, tokensOut, cost }
       }
       // 空响应 → 换下一个 provider
       break
     }
   }
-  return { text: '', providerId: chain[0]?.id ?? '', toolCalls: 0 }
+  return { text: '', providerId: chain[0]?.id ?? '', toolCalls: 0, tokensIn, tokensOut, cost }
 }
 
 /** 直接调用（WebUI 手测 LLM 用），返回完整响应或错误信息 */

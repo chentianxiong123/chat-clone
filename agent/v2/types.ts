@@ -48,6 +48,7 @@ export interface ThreadMeta {
   lastPreview: string
   unread: number
   paused: boolean
+  archived: boolean
 }
 
 export interface RunRecord {

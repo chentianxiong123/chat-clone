@@ -181,7 +181,6 @@ function renderGroup(g) {
       </div>
       <div class="flex gap-2 items-center">
         ${timerBadge}
-        <button class="btn btn-xs btn-ghost text-error act-clear" title="清空该场景记忆">清空</button>
         <button class="btn btn-xs btn-primary act-flush">立即触发</button>
       </div>
     </div>
@@ -198,19 +197,7 @@ function bindGroupButtons() {
       await fetch('/api/flush', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
     })
   })
-  document.querySelectorAll('.act-clear').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const key = btn.closest('[data-key]').dataset.key
-      if (!confirm(`清空场景 ${key} 的会话记忆？`)) return
-      await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
-    })
-  })
 }
-
-$('ov-clear-all').addEventListener('click', async () => {
-  if (!confirm('清空所有群的会话记忆？')) return
-  await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
-})
 
 // ── 人设 ──
 async function loadPersona() {
