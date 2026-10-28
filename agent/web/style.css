@@ -130,6 +130,18 @@ body {
   outline: none;
 }
 .rag-num:focus { border-color: rgba(129, 140, 248, .55); }
+.rag-select {
+  width: 100%;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: .72rem;
+  outline: none;
+  cursor: pointer;
+}
+.rag-select:focus { border-color: rgba(129, 140, 248, .55); }
 
 /* ── 时间范围切换（AstrBot 式 chips）── */
 .range-switch { display: flex; gap: 4px; background: var(--glass); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }

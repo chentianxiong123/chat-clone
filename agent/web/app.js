@@ -328,7 +328,12 @@ function renderRagForm(cfg) {
         <div class="flex items-center gap-2 w-full">
           <input type="range" id="rag-vp" class="flex-1 accent-indigo-500" min="0" max="100" step="5" value="${vp}">
           <span class="font-mono text-xs text-slate-300 w-9 text-right shrink-0" id="rag-vp-v">${vp}%</span>
-        </div>`, '本地有命中时，以该概率额外升级向量（0=只用本地）', 'lg:col-span-2')}
+        </div>`, '本地有命中时，以该概率额外升级向量（0=只用本地）')}
+      ${cell('嵌入上游', `
+        <select id="rag-embed-provider" class="rag-select">
+          <option value="" ${cfg.embedProvider ? '' : 'selected'}>自动（首个可用）</option>
+          ${(cfg.embedProviders || []).map(p => `<option value="${esc(p.id)}" ${cfg.embedProvider === p.id ? 'selected' : ''}>${esc(p.name)} · ${esc(p.embedModel)}</option>`).join('')}
+        </select>`, cfg.embedProviders?.length ? '选择做向量化的 provider 上游' : 'providers.json 未配 embedModel')}
       ${cell('本地空时强制向量', chip('fb-btn', '', cfg.vecFallbackOnEmpty ? '开' : '关', !!cfg.vecFallbackOnEmpty, true), '本地无命中就向量兜底')}
       ${cell('每路命中 topK', `<input type="number" id="rag-topk" class="rag-num" min="1" max="50" value="${cfg.topK ?? 3}">`, '每个通道最多取几条')}
     </div>
@@ -378,6 +383,7 @@ async function saveRagConfig() {
     toolMaxIter: Number($('rag-maxiter').value),
     toolMaxItems: Number($('rag-maxitems').value),
     factMaxChars: Number($('rag-fact').value),
+    embedProvider: $('rag-embed-provider') ? $('rag-embed-provider').value : '',
   }
   const btn = $('rag-save')
   const note = $('rag-save-note')

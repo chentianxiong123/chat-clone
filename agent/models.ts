@@ -33,6 +33,10 @@ export interface ProviderSpec {
   fallback?: string[]
   timeout?: number
   enabled?: boolean
+  /** 若配置，则此 provider 也可用作 RAG embedding 上游（模型名用此值） */
+  embedModel?: string
+  /** 可选 HTTP 代理（如 http://ip:port），clientFor 通过 undici ProxyAgent 走该出口 */
+  proxy?: string
 }
 
 interface ProvidersFile {
@@ -133,9 +137,23 @@ export function clientFor(spec: ProviderSpec): OpenAI {
     apiKey: resolveKey(spec.apiKey) || 'sk-none',
     timeout: spec.timeout ?? 120_000,
     defaultHeaders: { 'User-Agent': 'chat-clone-agent/0.1.0' },
+    ...(spec.proxy ? { fetch: proxiedFetch(spec.proxy) } : {}),
   })
   _clients.set(spec.id, client)
   return client
+}
+
+/** 通过 undici ProxyAgent 走代理的 fetch（provider 上游在代理后面时用） */
+function proxiedFetch(proxyUrl: string): typeof fetch {
+  let agent: import('undici').ProxyAgent | null = null
+  return (async (input: any, init?: any) => {
+    if (!agent) {
+      const { ProxyAgent } = await import('undici')
+      agent = new ProxyAgent(proxyUrl)
+    }
+    const { fetch: ufetch } = await import('undici')
+    return ufetch(input, { ...(init ?? {}), dispatcher: agent })
+  }) as typeof fetch
 }
 
 /** 列出某 provider 可用模型（模型下拉用） */
@@ -146,6 +164,22 @@ export async function listModelsFor(spec: ProviderSpec): Promise<Array<{ id: str
   } catch (e) {
     return []
   }
+}
+
+/** 当前嵌入上游：显式指定 embedProvider 或第一个配了 embedModel 的可用 provider */
+export function getEmbedProvider(): ProviderSpec | undefined {
+  const pf = getProvidersFile()
+  if (config.rag.embedProvider) {
+    return pf.providers.find(p => p.id === config.rag.embedProvider && p.enabled !== false && p.embedModel)
+  }
+  return pf.providers.find(p => p.enabled !== false && p.embedModel)
+}
+
+/** 列出所有可作嵌入上游的 provider（前端下拉用） */
+export function listEmbedProviders(): Array<{ id: string; name: string; model: string; embedModel: string }> {
+  return getProvidersFile().providers
+    .filter(p => p.enabled !== false && p.embedModel)
+    .map(p => ({ id: p.id, name: p.name, model: p.model, embedModel: p.embedModel as string }))
 }
 
 /** 健康测试：发一个最小 chat completion，返回通不通/耗时/错误 */

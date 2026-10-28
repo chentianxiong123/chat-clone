@@ -8,7 +8,7 @@ import { ragImportInfo, ragSearch, ragStatus, searchRag } from './rag.js'
 import { buildSystemPrompt, buildStyleHintMessage } from './prompt.js'
 import { callLlmRaw, listModels, healthCheckAll } from './llm.js'
 import { getUsageSummary } from './stats.js'
-import { getProvidersFile, getActiveProvider, setActiveProvider, listProviders, testProvider, getProvider } from './models.js'
+import { getProvidersFile, getActiveProvider, setActiveProvider, listProviders, testProvider, getProvider, listEmbedProviders } from './models.js'
 import { listSceneSummaries } from './memory.js'
 import { fileURLToPath } from 'node:url'
 
@@ -337,6 +337,18 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           const v = Math.max(10, Math.round(Number(body.factMaxChars)))
           config.rag.factMaxChars = v; applied.push('factMaxChars'); patch.MEMORY_FACT_MAX_CHARS = String(v)
         }
+        if (typeof body.embedProvider === 'string') {
+          // 空字符串 = 自动（第一个配 embedModel 的 provider）
+          const v = body.embedProvider.trim()
+          const exists = !v || listEmbedProviders().some(p => p.id === v)
+          if (exists) {
+            config.rag.embedProvider = v
+            applied.push('embedProvider')
+            patch.RAG_EMBED_PROVIDER = v
+          } else {
+            return json(res, 200, { ok: false, error: `未知 embed provider: ${v}`, applied, config: buildRagConfig(), rag: await ragStatus() })
+          }
+        }
 
         if (Object.keys(patch).length) {
           const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
@@ -645,6 +657,8 @@ function buildRagConfig() {
     embedEndpoint: config.rag.embedEndpoint,
     embedModel: config.rag.embedModel,
     embedProxy: config.rag.embedProxy,
+    embedProvider: config.rag.embedProvider,
+    embedProviders: listEmbedProviders(),
     embedEnabled: config.rag.embedEnabled,
     ftsEnabled: config.rag.ftsEnabled,
     likeEnabled: config.rag.likeEnabled,

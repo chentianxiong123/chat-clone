@@ -76,6 +76,9 @@ export const config = {
     embedApiKey: process.env.EMBED_API_KEY || '',
     embedModel: process.env.EMBED_MODEL || 'qwen3-embedding-0.6b',
     embedProxy: process.env.EMBED_PROXY || '',
+    // 嵌入上游来源：providers.json 里配了 embedModel 的 provider id；
+    // 空 = 自动用第一个配了 embedModel 的 provider（旧版回退 EMBED_ENDPOINT）
+    embedProvider: process.env.RAG_EMBED_PROVIDER || '',
     vec0: process.env.VEC0_SO || '',
     topK: Number(process.env.RAG_TOP_K) || 3,
     // 检索策略优先级: "vec" > "fts" > "like" (逗号分隔)
