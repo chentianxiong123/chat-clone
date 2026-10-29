@@ -331,6 +331,10 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           const v = Math.max(0, Math.min(1, Number(body.vecMinScore)))
           config.rag.vecMinScore = v; applied.push('vecMinScore'); patch.RAG_VEC_MIN_SCORE = String(v)
         }
+        if (typeof body.recallMode === 'string' && ['all', 'random', 'agent', 'auto'].includes(body.recallMode)) {
+          config.rag.recallMode = body.recallMode as 'all' | 'random' | 'agent' | 'auto'
+          applied.push('recallMode'); patch.RAG_RECALL_MODE = body.recallMode
+        }
         if (typeof body.embedEnabled === 'boolean') {
           config.rag.embedEnabled = body.embedEnabled
           applied.push('embedEnabled'); patch.RAG_EMBED_ENABLED = String(body.embedEnabled)

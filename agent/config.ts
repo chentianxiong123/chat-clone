@@ -106,6 +106,13 @@ export const config = {
     // 注：qwen3-embedding-0.6b 余弦分整体偏低，语义相关召回约 0.13~0.27，
     // 明显无关约 <0.10；阈值取 0.10 能保住相关召回、只挡明显无关。
     vecMinScore: clamp01(envNum('RAG_VEC_MIN_SCORE', 0.10)),
+    // 召回方式（非严肃场景，简单多样即可，可配置）：
+    //   all    = 三路一起召回（vec+fts+like 合并去重，每次内容最全）
+    //   random = 偶尔随机换召回方式（每次随机挑一路非空，增加多样性）
+    //   agent  = 暴露给 agent 选（search_past_memory 的 method 参数指定）
+    //   auto   = 向量优先+回退（规范化规则：vec 达标用、不对回退 fts/like）
+    recallMode: (['all', 'random', 'agent', 'auto'].includes(process.env.RAG_RECALL_MODE || '')
+      ? process.env.RAG_RECALL_MODE : 'auto') as 'all' | 'random' | 'agent' | 'auto',
     // ── RAG 工具化（function call）──
     // 总开关：开启后不再每轮把 RAG 当 user 参考资料注入，改为工具按需调用
     toolsEnabled: process.env.RAG_TOOLS_ENABLED !== 'false',

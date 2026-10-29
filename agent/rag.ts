@@ -165,33 +165,48 @@ export interface RagResult {
   vecLoaded: boolean
 }
 
-export async function searchRag(query: string): Promise<string> {
+export async function searchRag(query: string, modeOverride?: string): Promise<string> {
   const res = await ragSearch(query)
-  // ── 规范化多路召回规则 ──
-  //   主路由 = strategy 顺序第一个非空；主路=向量时按 vecMinScore 判质量：
-  //   达标 → 用向量；"召回不对"（最高分 < vecMinScore）→ 回退下一路由（fts→like）；
-  //   本地路由（fts/like）零成本、非空即用（有就比没有好）；
-  //   全部路由都"不对"或空 → 兜底取所有命中里最高分的路由（保证不空手而归）。
+  // ── 召回方式（mode）：modeOverride（工具传）> config.rag.recallMode > 默认 auto ──
+  //   all    = 三路一起召回（合并去重按分排序）
+  //   random = 随机挑一路非空（偶尔换召回方式，增加多样性；非严肃场景够用）
+  //   vec/fts/like = 指定走某一路
+  //   auto   = 规范化：主路=向量，最高分 < vecMinScore（召回不对）→ 回退 fts/like；
+  //            全部不对/空 → 兜底取所有命中里最高分的路由（不空手而归）
+  const mode = modeOverride || config.rag.recallMode
   const byMethod = (m: string): RagHit[] =>
     m === 'vec' ? res.vec : m === 'fts' ? res.fts : res.like
   const topScore = (arr: RagHit[]): number =>
     arr.length ? Math.max(...arr.map(h => h.score)) : 0
 
   let picked: RagHit[] = []
-  for (const m of config.rag.strategy) {
-    const arr = byMethod(m)
-    if (!arr.length) continue
-    // 向量是"花 API 钱"的路由：质量不达标（召回不对）→ 跳过，换下一路由
-    if (m === 'vec' && config.rag.vecMinScore > 0 && topScore(arr) < config.rag.vecMinScore) continue
-    picked = arr
-    break
-  }
-  // 兜底：所有路由都"召回不对"→ 取全部命中里最高分的路由
-  if (!picked.length) {
-    const all = [...res.vec, ...res.fts, ...res.like]
-    if (all.length) {
-      const mx = Math.max(...all.map(h => h.score))
-      picked = all.filter(h => h.score === mx)
+  if (mode === 'all') {
+    const seen = new Set<string>()
+    const merged: RagHit[] = []
+    for (const r of [...res.vec, ...res.fts, ...res.like]) {
+      if (!seen.has(r.chunkId)) { seen.add(r.chunkId); merged.push(r) }
+    }
+    picked = merged.sort((a, b) => b.score - a.score)
+  } else if (mode === 'random') {
+    const roads = ['vec', 'fts', 'like'].filter(m => byMethod(m).length)
+    if (roads.length) picked = byMethod(roads[Math.floor(Math.random() * roads.length)])
+  } else if (mode === 'vec' || mode === 'fts' || mode === 'like') {
+    picked = byMethod(mode)
+  } else {
+    // auto：规范化多路召回规则（见上方注释）
+    for (const m of config.rag.strategy) {
+      const arr = byMethod(m)
+      if (!arr.length) continue
+      if (m === 'vec' && config.rag.vecMinScore > 0 && topScore(arr) < config.rag.vecMinScore) continue
+      picked = arr
+      break
+    }
+    if (!picked.length) {
+      const all = [...res.vec, ...res.fts, ...res.like]
+      if (all.length) {
+        const mx = Math.max(...all.map(h => h.score))
+        picked = all.filter(h => h.score === mx)
+      }
     }
   }
   if (!picked.length) return ''

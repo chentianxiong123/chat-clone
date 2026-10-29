@@ -35,10 +35,10 @@ function relevant(query: string, note: string): boolean {
  * 取一段记忆：优先查已记住的事实（remember 写入），没有再查历史语料。
  * 返回完整对话对（对方说→你接），模型看真实语境模仿；空串=没想起来。
  */
-export async function searchMemoryNote(sceneKey: string, query: string): Promise<string> {
+export async function searchMemoryNote(sceneKey: string, query: string, mode?: string): Promise<string> {
   const facts = searchFacts(sceneKey, query, config.rag.toolMaxItems)
   if (facts.length) return facts[0].slice(0, config.rag.factMaxChars)
-  const raw = await searchRag(query)
+  const raw = await searchRag(query, mode)
   if (!raw || !relevant(query, raw)) return ''
   // 对话对：user=对方、assistant=你（本人）。转成"对方/你"标签，模型看真实接话语境。
   return raw.split('\n').map(l => {
@@ -60,6 +60,13 @@ export const MEMORY_TOOLS: ToolSpec[] = [
         type: 'object',
         properties: {
           query: { type: 'string', description: '要回忆的关键词或问题，例如"上次说要买的耳机"' },
+          method: {
+            type: 'string',
+            enum: ['auto', 'all', 'random', 'vec', 'fts', 'like'],
+            description:
+              '召回方式（可选）：all=三路一起召回；random=随机挑一路；' +
+              'vec/fts/like=指定某一路；auto=默认（向量优先+回退）。不填用系统配置。',
+          },
         },
         required: ['query'],
       },
@@ -89,7 +96,8 @@ export function createMemoryExecutors(sceneKey: string): Record<string, ToolExec
     search_past_memory: async (args: Record<string, unknown>) => {
       const q = String(args?.query ?? '').trim()
       if (!q) return '（没想起来）'
-      const note = await searchMemoryNote(sceneKey, q)
+      const method = String(args?.method ?? '').trim()
+      const note = await searchMemoryNote(sceneKey, q, method || undefined)
       // 直接返回真实对话对（对方说→你接），模型看语境；不再包"你隐约记得"（那是人机痕迹）
       return note || '（没想起来）'
     },
