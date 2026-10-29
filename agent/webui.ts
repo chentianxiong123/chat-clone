@@ -659,6 +659,8 @@ function buildRagConfig() {
     strategy: config.rag.strategy,
     vecProb: config.rag.vecProb,
     vecFallbackOnEmpty: config.rag.vecFallbackOnEmpty,
+    vecMinScore: config.rag.vecMinScore,
+    recallMode: config.rag.recallMode,
     toolsEnabled: config.rag.toolsEnabled,
     recallProb: config.rag.recallProb,
     toolMaxIter: config.rag.toolMaxIter,

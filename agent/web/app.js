@@ -337,7 +337,11 @@ function renderRagForm(cfg) {
           ${(cfg.embedProviders || []).map(p => `<option value="${esc(p.id)}" ${cfg.embedProvider === p.id ? 'selected' : ''}>${esc(p.name)} · ${esc(p.embedModel)}</option>`).join('')}
         </select>`, cfg.embedProviders?.length ? '选择做向量化的 provider 上游' : 'providers.json 未配 embedModel')}
       ${cell('本地空时强制向量', chip('fb-btn', '', cfg.vecFallbackOnEmpty ? '开' : '关', !!cfg.vecFallbackOnEmpty, true), '本地无命中就向量兜底')}
-      ${cell('每路命中 topK', `<input type="number" id="rag-topk" class="rag-num" min="1" max="50" value="${cfg.topK ?? 3}">`, '每个通道最多取几条')}
+      ${cell('召回方式', `
+        <select id="rag-recall-mode" class="rag-select">
+          ${['auto', 'all', 'random', 'agent'].map(m => `<option value="${m}" ${(cfg.recallMode || 'auto') === m ? 'selected' : ''}>${{ auto: '向量优先+回退', all: '三路一起召回', random: '随机换召回', agent: '模型自己选' }[m]}</option>`).join('')}
+        </select>`, 'auto=向量达标用、不对回退；all=三路全召；random=随机挑一路；agent=search_past_memory 的 method 指定')}
+      ${cell('向量质量阈值', `<input type="number" id="rag-vmins" class="rag-num" min="0" max="1" step="0.01" value="${cfg.vecMinScore ?? 0.10}">`, '向量余弦分低于此视为"召回不对"→换路（qwen3 相关约0.13~0.27、无关<0.10）')}
     </div>
     <div id="rag-toolbox" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3 ${cfg.toolsEnabled ? '' : 'hidden'}">
       ${cell('主动回忆概率', `
@@ -380,6 +384,8 @@ async function saveRagConfig() {
     toolsEnabled: modeBtn ? modeBtn.dataset.mode === 'true' : false,
     vecProb: Number($('rag-vp').value) / 100,
     vecFallbackOnEmpty: !!el.querySelector('.fb-btn') && el.querySelector('.fb-btn').classList.contains('active'),
+    vecMinScore: Number($('rag-vmins').value),
+    recallMode: $('rag-recall-mode').value,
     topK: Number($('rag-topk').value),
     recallProb: Number($('rag-rp').value) / 100,
     toolMaxIter: Number($('rag-maxiter').value),
