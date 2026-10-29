@@ -1,8 +1,6 @@
 import { config } from '../config.js'
 import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm.js'
 import { buildSystemPrompt } from '../prompt.js'
-import { tooSimilar, pushRecent } from '../antirepeat.js'
-import { limitProfanity } from '../profanity.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
 import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
@@ -39,7 +37,6 @@ function styleBias(mods?: StateModifiers): StyleBias | undefined {
 }
 
 export class AgentRuntime {
-  private recentReplies = new Map<string, string[]>()
   private lastReplyAt = new Map<string, number>()
   private chains = new Map<string, Promise<void>>()
 
@@ -104,9 +101,6 @@ export class AgentRuntime {
         ]
       }
       hist = hist.slice(-config.agent.maxHistory)
-
-      const recent = this.recentReplies.get(key) ?? []
-      const ar = config.humanlike.antiRepeat
 
       const scopeLine = thread.kind === 'group' && triggerNick
         ? `（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）`
@@ -195,19 +189,6 @@ export class AgentRuntime {
         : [raw]
       const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, ctx, styleBias(mods)))))
       reply = styled.join('\n')
-      if (config.humanlike.profanity.hardBlock) {
-        const cleaned = limitProfanity(reply, config.humanlike.profanity.replace)
-        if (cleaned !== reply) {
-          console.log('[V2] 重级脏话拦截')
-          reply = cleaned
-        }
-      }
-
-      if (ar.enabled && reply && tooSimilar(reply, recent, ar.dropSim)) {
-        console.log(`[V2] ${key} 回复与近期过于相似，跳过`)
-        status = 'skipped'
-        return rec
-      }
 
       const finalReply = reply
       if (!finalReply) {
@@ -226,7 +207,6 @@ export class AgentRuntime {
       const assistantMsg: ChatMessage = { role: 'assistant', content: finalReply, time: Date.now() }
       const updated: ChatMessage[] = [...hist, userMsg, assistantMsg].slice(-config.agent.maxHistory)
       await this.persist(key, updated)
-      this.recentReplies.set(key, pushRecent(recent, finalReply, ar.window))
       this.lastReplyAt.set(key, Date.now())
       status = 'ok'
       return rec

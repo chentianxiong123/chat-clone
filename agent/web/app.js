@@ -784,16 +784,6 @@ function renderActiveConfig(cfg, rag, profileMeta) {
         <div class="text-slate-600">保近${Math.round((cfg.agent.memoryKeepRecentRatio||0)*100)}% 摘要合并${cfg.agent.memorySummaryMerging ? '开' : '关'} 持久${cfg.agent.memoryPersist ? '开' : '关'}</div>
       </div>
       <div class="glass p-3 round-xl">
-        <div class="text-slate-500 uppercase mb-1">拟人 · 防重复/忽略短</div>
-        <div class="font-mono">重复窗${hl.antiRepeat?.window}≥${hl.antiRepeat?.minCount}×${hl.antiRepeat?.ratio}</div>
-        <div class="text-slate-600">忽略短${hl.ignoreShort?.minChars}字×${pct(hl.ignoreShort?.prob)} 相似跳过${hl.antiRepeat?.dropSim}</div>
-      </div>
-      <div class="glass p-3 round-xl">
-        <div class="text-slate-500 uppercase mb-1">拟人 · 刷屏/脏话</div>
-        <div class="font-mono">刷屏${hl.burst?.maxReplies}次/${(hl.burst?.windowMs/1000).toFixed(0)}s +${(hl.burst?.extraCooldownMs/1000).toFixed(0)}s</div>
-        <div class="text-slate-600">脏话硬拦${hl.profanity?.hardBlock ? '开' : '关'}${hl.profanity?.replace ? ' → ' + esc(hl.profanity.replace) : ''}</div>
-      </div>
-      <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">工具化 agent</div>
         <div class="font-mono">工具循环≤${cfg.agent.toolMaxIter}</div>
         <div class="text-slate-600">get_state ${cfg.agent.getStateEnabled ? '开' : '关'} · reply/search_past_memory/remember</div>

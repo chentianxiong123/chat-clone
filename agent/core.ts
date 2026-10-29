@@ -2,9 +2,7 @@ import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
 import { buildSystemPrompt } from './prompt.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
-import { tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
-import { limitProfanity } from './profanity.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
@@ -174,8 +172,6 @@ export class AgentCore {
   private lastActiveAt = 0
   /** 每个场景最后一次本人发言时间（对话状态用：热聊/冷场） */
   private lastSelfAt = new Map<SceneKey, number>()
-  /** 近期回复时间戳（刷屏抑制 / burst 用） */
-  private replyHistory: number[] = []
   /** 近期状态（全局：精力/心情/耐心/社交/烦躁/兴趣…） */
   private recentState: RecentState
   private stateKey = 'global'
@@ -186,7 +182,7 @@ export class AgentCore {
   /** 回复轮次锁：某场景正在"生成+逐条发送"期间锁住，不再触发新回复；整轮发完才解锁重判 */
   private replying = new Set<SceneKey>()
   /** 每个场景最近若干条自己的回复（反模板/近重复检测用） */
-  private recentReplies = new Map<SceneKey, string[]>()
+
   connected = false
   connError?: string
 
@@ -238,13 +234,6 @@ export class AgentCore {
     this.recentState = onMessage(this.recentState, text, Date.now(), { atBot: msg.atBot, woke })
     this.persistState()
 
-    // 敷衍短消息忽略（真人经常"好的""嗯"当没看见）
-    const ignore = config.humanlike.ignoreShort
-    if (text.length < (ignore.minChars || 0) && chance(ignore.prob)) {
-      console.log(`[Core] 短消息忽略（ignoreShort） ${key}: ${text.slice(0, 24)}`)
-      this.emit()
-      return
-    }
     // 半醒时段：概率静默（看到但不想理）
     if (chance(drowsyProb())) {
       console.log(`[Core] 半醒时段概率静默 ${key}`)
@@ -413,8 +402,6 @@ export class AgentCore {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
 
-      const ar = config.humanlike.antiRepeat
-      const recent = this.recentReplies.get(key) ?? []
       // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁（场景事实，非风格诱导）
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
@@ -468,21 +455,6 @@ export class AgentCore {
       const segs = toolReplies.length ? toolReplies : [raw]
       const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, ctx, this.styleBias(mods)))))
       let reply = styled.join('\n')
-      // 重级脏话硬拦截（侮辱家人/极端攻击），轻中级别不压
-      const pf = config.humanlike.profanity
-      if (pf.hardBlock) {
-        const cleaned = limitProfanity(reply, pf.replace)
-        if (cleaned !== reply) {
-          console.log('[Core] 重级脏话拦截')
-          reply = cleaned
-        }
-      }
-      // 近重复跳过：与近期回复过于相似就别复读了（也顺带降低刷屏）
-      if (ar.enabled && tooSimilar(reply, recent, ar.dropSim)) {
-        console.log(`[Core] ${key} 回复与近期过于相似，跳过`)
-        this.emit()
-        return
-      }
       console.log(`[Core] 回复 ${key}: ${reply}`)
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
@@ -490,17 +462,15 @@ export class AgentCore {
       this.dialogs.set(key, updated)
       this.persist(key)
 
-      // 发消息一定要慢：距上一条回复至少 cooldown（带随机抖动×状态冷却乘数）；刷屏太密再叠加额外冷却
+      // 发消息一定要慢：距上一条回复至少 cooldown（带随机抖动×状态冷却乘数）
       const baseCd = jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown
-      const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), this.burstWaitMs())
+      const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), 0)
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, styled)
-      this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
       this.persistState(true)
-      this.noteReply()
       if (!g.simulated) recordGroupReply(id)
       this.emit()
     } catch (err) {
@@ -553,8 +523,6 @@ export class AgentCore {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
-      const ar = config.humanlike.antiRepeat
-      const recent = this.recentReplies.get(key) ?? []
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
@@ -592,23 +560,13 @@ export class AgentCore {
       const segs = toolReplies.length ? toolReplies : [raw]
       const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, lastMsg, this.styleBias(mods)))))
       let reply = styled.join('\n')
-      const pf = config.humanlike.profanity
-      if (pf.hardBlock) {
-        const cleaned = limitProfanity(reply, pf.replace)
-        if (cleaned !== reply) {
-          console.log('[Core] 重级脏话拦截')
-          reply = cleaned
-        }
-      }
-      const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
+      const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), 0)
       if (wait > 0) await sleep(wait)
       await this.sendReplySegmented(t, id, styled)
-      this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
       this.recentState = onReply(this.recentState, Date.now(), [...reply].length)
       this.persistState(true)
-      this.noteReply()
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply, time: Date.now() }
       const updated: ChatMessage[] = [...(await this.dialogFor(key)), userMsg, assistantMsg].slice(-config.agent.maxHistory)
       this.dialogs.set(key, updated)
@@ -691,21 +649,6 @@ export class AgentCore {
       }
       logSeg(i, seg)
     }
-  }
-
-  /** 记录一次回复时间戳（刷屏抑制窗口） */
-  private noteReply(): void {
-    const now = Date.now()
-    this.replyHistory = this.replyHistory.filter(t => now - t < config.humanlike.burst.windowMs)
-    this.replyHistory.push(now)
-  }
-
-  /** 刷屏抑制：窗口内回复数达上限 → 额外冷却 */
-  private burstWaitMs(): number {
-    const b = config.humanlike.burst
-    const now = Date.now()
-    this.replyHistory = this.replyHistory.filter(t => now - t < b.windowMs)
-    return this.replyHistory.length >= b.maxReplies ? b.extraCooldownMs : 0
   }
 
   // ── 对外状态（WebUI）────────────────────────────────────────────────

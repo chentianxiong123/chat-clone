@@ -26,8 +26,6 @@ const PRESET_DEFAULTS: Record<string, string> = {
   BATCH_N_MIN: '3',
   BATCH_N_MAX: '6',
   BATCH_T: '60000',
-  HL_IGNORE_SHORT_MIN_CHARS: '0',
-  HL_IGNORE_SHORT_PROB: '0',
   HL_STATE_MODEL: 'false',
   HL_STATE_INJECT: 'false',
 }
@@ -42,12 +40,10 @@ const ENV_PRESETS: Array<{ name: string; label: string; description: string; pat
   {
     name: 'quiet',
     label: '安静（只回 @）',
-    description: '仅 @/唤醒词触发，忽略敷衍短句',
+    description: '仅 @/唤醒词触发',
     patch: {
       RESPOND_MODE: 'mention',
       PROACTIVE_GAP_MS: '0',
-      HL_IGNORE_SHORT_MIN_CHARS: '2',
-      HL_IGNORE_SHORT_PROB: '0.5',
     },
   },
   {
@@ -60,8 +56,6 @@ const ENV_PRESETS: Array<{ name: string; label: string; description: string; pat
       BATCH_N_MIN: '3',
       BATCH_N_MAX: '4',
       BATCH_T: '30000',
-      HL_IGNORE_SHORT_MIN_CHARS: '0',
-      HL_IGNORE_SHORT_PROB: '0',
     },
   },
   {

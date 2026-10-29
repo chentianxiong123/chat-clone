@@ -228,25 +228,13 @@ export const config = {
         contextMsgs: Math.max(1, Math.round(envNum('HL_REPLY_DYNAMIC_CONTEXT_MSGS', 3))),
       },
     },
-    // 重级脏话硬拦截（侮辱家人/极端攻击）；按用户要求先不压密度，只拦最过分的
-    profanity: {
-      hardBlock: process.env.HL_PROFANITY_HARD_BLOCK !== 'false',
-      replace: process.env.HL_PROFANITY_REPLACE || '真服了',
-    },
-    // 太短的敷衍消息直接忽略（如"好的""嗯"），真人常当没看见
-    ignoreShort: {
-      minChars: Number(process.env.HL_IGNORE_SHORT_MIN_CHARS) || 0, // 低于此长度 视为无意义
-      prob: clamp01(Number(process.env.HL_IGNORE_SHORT_PROB) || 0),  // 命中后沉默概率
-    },
-    // 反模板/反复读：最近 N 条自己回复的高频词提醒 + 近重复跳过，避免一个词锁死（如"剑魔"75%）
-    antiRepeat: {
-      enabled: process.env.HL_ANTIREPEAT !== 'false',
-      window: Math.max(3, Math.round(envNum('HL_ANTIREPEAT_WINDOW', 20))),
-      minCount: Math.max(2, Math.round(envNum('HL_ANTIREPEAT_MIN_COUNT', 3))),
-      ratio: clamp01(envNum('HL_ANTIREPEAT_RATIO', 0.25)),
-      dropSim: clamp01(envNum('HL_ANTIREPEAT_SIM_THRESHOLD', 0.85)),
-      maxHint: Math.max(1, Math.round(envNum('HL_ANTIREPEAT_MAX_HINT', 6))),
-    },
+    // ── 已停用（扫进垃圾堆 2026-10-30）──
+    // 重级脏话硬拦 / 忽略短 / 防重复(反模板) / 刷屏抑制 均已从 core/v2 移除——
+    // 用户定调：粗口靠数据自然体现、不靠规则拦截；行为少干预。字段保留仅供类型兼容。
+    profanity: { hardBlock: false, replace: '真服了' },
+    ignoreShort: { minChars: 0, prob: 0 },
+    antiRepeat: { enabled: false, window: 20, minCount: 3, ratio: 0.25, dropSim: 0.85, maxHint: 6 },
+    burst: { maxReplies: Number.MAX_SAFE_INTEGER, windowMs: 180_000, extraCooldownMs: 0 },
     // ── B. 反应与节奏 —— 多久回 ──
     react: {
       minMs: Number(process.env.REPLY_REACT_MIN_MS) || 2500,
