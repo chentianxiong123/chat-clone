@@ -3,7 +3,7 @@ import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm
 import { buildSystemPrompt } from '../prompt.js'
 import { tooSimilar, pushRecent } from '../antirepeat.js'
 import { limitProfanity } from '../profanity.js'
-import { applyStyle, sampleReactMs, type StyleBias } from '../profile.js'
+import { applyStyle, sampleReactMs, replaceMechanismWords, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
 import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
 import { createToolRegistry, type SendMessageFn } from './tools.js'
@@ -193,7 +193,7 @@ export class AgentRuntime {
       const segs = tools.context.sentByTool && tools.context.sentTexts.length
         ? tools.context.sentTexts
         : [raw]
-      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, ctx, styleBias(mods))))
+      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, ctx, styleBias(mods)))))
       reply = styled.join('\n')
       if (config.humanlike.profanity.hardBlock) {
         const cleaned = limitProfanity(reply, config.humanlike.profanity.replace)

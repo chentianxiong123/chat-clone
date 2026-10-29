@@ -36,6 +36,6 @@ export function buildSystemPrompt(scene?: SceneType): string {
 ## 回复
 - 要说话就调 reply，内容就是你对朋友说的话本身。
 - 想分几条说就调用几次 reply，每条一句；不要把几条拼成一条里用换行。
-- 回忆/确认往事先 search_past_memory；想不起就直说，不硬撑。`
+- 回忆/确认往事先 search_past_memory；想不起就直说"记不清了/忘了"，别说是"翻了翻记忆/检索/查记忆"——你说话就是人话。`
   return prompt
 }

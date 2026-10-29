@@ -339,3 +339,24 @@ export function lastWord(ctx: string): string {
   // 取尾部 2~6 字（整句最后"词"）
   return tail.slice(-6)
 }
+
+/** 机制词（暴露"我在查记忆/调工具"的人机痕迹）。真人只说"记不清了/忘了"，不说"翻了翻记忆"。 */
+const MECHANISM_RE =
+  /(翻.{0,3}记忆|检索|查(了?查|一下|了)?记忆|搜(了?搜|一下|了)?记忆|记忆库|数据库|我的记忆|从记忆|根据记忆|工具调用|调用了?工具|用(了)?工具)/
+const REAL_GAP = '记不清了'
+
+/**
+ * 防露馅：把回复里"我翻了翻记忆/检索/查记忆"这类机制句替换成真人说法。
+ * 代码层兜底——不依赖模型遵守提示词，确保回复永远是"人话"，不暴露自己会查东西。
+ */
+export function replaceMechanismWords(text: string): string {
+  if (!text) return text
+  const parts = text.split(/(?<=[。！？!?\n])/)
+  const out = parts.map(part => {
+    if (!MECHANISM_RE.test(part)) return part
+    const tail = part.match(/[。！？!?…\n]*$/)?.[0] || ''
+    const nl = tail.includes('\n') ? '\n' : ''
+    return REAL_GAP + tail.replace(/\n/g, '') + nl
+  })
+  return out.join('')
+}

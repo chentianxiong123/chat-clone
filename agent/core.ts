@@ -5,7 +5,7 @@ import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from '
 import { tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
 import { limitProfanity } from './profanity.js'
-import { applyStyle, sampleReactMs, stateReplyProb, type StyleBias } from './profile.js'
+import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
   loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
@@ -466,7 +466,7 @@ export class AgentCore {
       // 话术风格后处理：每条 reply 独立样式（表情/语气词/错字），保持"每条一条消息"的工具边界。
       // 分段源 = 模型调用的 reply 工具序列（每条一条）；未走工具则整段兜底。
       const segs = toolReplies.length ? toolReplies : [raw]
-      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, ctx, this.styleBias(mods))))
+      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, ctx, this.styleBias(mods)))))
       let reply = styled.join('\n')
       // 重级脏话硬拦截（侮辱家人/极端攻击），轻中级别不压
       const pf = config.humanlike.profanity
@@ -590,7 +590,7 @@ export class AgentCore {
         if (!raw) return
       }
       const segs = toolReplies.length ? toolReplies : [raw]
-      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, lastMsg, this.styleBias(mods))))
+      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, lastMsg, this.styleBias(mods)))))
       let reply = styled.join('\n')
       const pf = config.humanlike.profanity
       if (pf.hardBlock) {
