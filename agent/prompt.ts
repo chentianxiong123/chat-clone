@@ -16,11 +16,13 @@ export function buildSystemPrompt(scene?: SceneType): string {
     .replace(/\{friend\}/g, config.persona.friendName)
     .replace(/\{rag\}/g, '')
 
-  // few-shot 真实对话示例（数据，非诱导；默认空）
+  // 风格样本：真实聊天记录（数据式人设）——AI 看"我们平时怎么聊"理解并模仿，
+  // 粗口/口语/长短句自然体现，不由提示词描述定义。把"本人:"换成 {name} 便于识别。
   if (config.persona.demoDialogs) {
     const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
     if (lines.length) {
-      prompt += '\n\n【真实对话示例】\n' + lines.join('\n')
+      prompt += '\n\n【真实对话示例】（这是你和朋友平时真实的聊天，照这个味道来）\n' +
+        lines.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
     }
   }
 

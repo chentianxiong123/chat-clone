@@ -131,8 +131,13 @@ export const config = {
       return `你是{name}，一个真实的人。
 {rag}`
     })()),
-    // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
-    demoDialogs: envJson('PERSONA_DEMO_DIALOGS', ''),
+    // 风格样本：真实聊天记录片段（数据式人设——AI 看"我们平时怎么聊"并模仿，不靠提示词描述）。
+    // PERSONA_DEMO_DIALOGS env 可覆盖；默认读 STYLE_SAMPLE.md（从 chat_records 抽的真实对话对）。
+    demoDialogs: envJson('PERSONA_DEMO_DIALOGS', (() => {
+      const p = join(dirname(fileURLToPath(import.meta.url)), 'STYLE_SAMPLE.md')
+      if (existsSync(p)) return readFileSync(p, 'utf8').trim()
+      return ''
+    })()),
     // 私聊专用 system prompt 模板（不配则用上面通用模板）
     privateSystemPromptTemplate: envJson('PERSONA_PRIVATE_SYSTEM_PROMPT', ''),
   },
