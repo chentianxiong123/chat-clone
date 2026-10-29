@@ -5,7 +5,7 @@ import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from '
 import { tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
 import { limitProfanity } from './profanity.js'
-import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
+import { applyStyle, sampleReactMs, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
   loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
@@ -463,8 +463,11 @@ export class AgentCore {
           return
         }
       }
-      // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
-      let reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
+      // 话术风格后处理：每条 reply 独立样式（表情/语气词/错字），保持"每条一条消息"的工具边界。
+      // 分段源 = 模型调用的 reply 工具序列（每条一条）；未走工具则整段兜底。
+      const segs = toolReplies.length ? toolReplies : [raw]
+      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, ctx, this.styleBias(mods))))
+      let reply = styled.join('\n')
       // 重级脏话硬拦截（侮辱家人/极端攻击），轻中级别不压
       const pf = config.humanlike.profanity
       if (pf.hardBlock) {
@@ -491,7 +494,7 @@ export class AgentCore {
       const baseCd = jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown
       const wait = Math.max(this.lastReplyAt + baseCd - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
-      await this.sendReplySegmented(t, id, reply)
+      await this.sendReplySegmented(t, id, styled)
       this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
@@ -586,7 +589,9 @@ export class AgentCore {
         raw = await callLlm(messages)
         if (!raw) return
       }
-      let reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))
+      const segs = toolReplies.length ? toolReplies : [raw]
+      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, lastMsg, this.styleBias(mods))))
+      let reply = styled.join('\n')
       const pf = config.humanlike.profanity
       if (pf.hardBlock) {
         const cleaned = limitProfanity(reply, pf.replace)
@@ -597,7 +602,7 @@ export class AgentCore {
       }
       const wait = Math.max(this.lastReplyAt + jitter(p.cooldown, config.humanlike.cooldown.jitter) * mods.cooldown - Date.now(), this.burstWaitMs())
       if (wait > 0) await sleep(wait)
-      await this.sendReplySegmented(t, id, reply, mods.segments)
+      await this.sendReplySegmented(t, id, styled)
       this.recentReplies.set(key, pushRecent(recent, reply, ar.window))
       this.lastReplyAt = Date.now()
       this.lastSelfAt.set(key, Date.now())
@@ -658,30 +663,15 @@ export class AgentCore {
   }
 
   /** 回车分割发送：回复按换行拆成多条，逐条带随机间隔发出（模拟真人打字） */
-  private async sendReplySegmented(t: SceneType, id: number, reply: string, segMod = 1): Promise<void> {
+  private async sendReplySegmented(t: SceneType, id: number, segments: string[]): Promise<void> {
     const ty = config.humanlike.typing
-    // 即使没有出站通道（如模拟注入）也打印分段，便于控制台观察节奏
+    // 工具格式分割：调用方传入的分段（每条 reply = 一条消息）原样发送，程序不再按长度/条数拆分。
     const logSeg = (i: number, seg: string): void => {
       console.log(`[Core] 分段 ${t}:${id} ${i}: ${seg.slice(0, 40)}`)
     }
-    if (!ty.onNewline) {
-      logSeg(0, reply)
-      if (this.onReply) await this.onReply(t, id, reply)
-      return
-    }
-    // 拆条 + 超长单条再拆 + 限制最多拆几条（超出部分合并到末尾，避免狂刷几十条）
-    // segMod：状态驱动的分段条数乘数（兴致高多拆几句，烦躁少发）
-    let segments = reply.split('\n').map(s => s.trimEnd())
-    const maxSegChars = config.humanlike.style.maxSegmentChars
-    if (maxSegChars > 0) segments = segments.flatMap(s => splitLongSegment(s, maxSegChars))
-    const maxSeg = ty.maxSegments > 0 ? Math.max(1, Math.round(ty.maxSegments * segMod)) : 0
-    if (maxSeg > 0 && segments.length > maxSeg) {
-      const head = segments.slice(0, maxSeg - 1)
-      const tail = segments.slice(maxSeg - 1).filter(s => s.trim() !== '')
-      segments = [...head, tail.join('\n')]
-    }
     let i = 0
-    for (const seg of segments) {
+    for (const raw of segments) {
+      const seg = raw.trimEnd()
       const isBlank = seg.trim() === ''
       if (isBlank && !ty.keepBlank) continue
       i++

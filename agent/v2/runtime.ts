@@ -3,7 +3,7 @@ import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm
 import { buildSystemPrompt } from '../prompt.js'
 import { tooSimilar, pushRecent } from '../antirepeat.js'
 import { limitProfanity } from '../profanity.js'
-import { applyStyle, sampleReactMs, splitLongSegment, type StyleBias } from '../profile.js'
+import { applyStyle, sampleReactMs, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
 import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
 import { createToolRegistry, type SendMessageFn } from './tools.js'
@@ -189,7 +189,12 @@ export class AgentRuntime {
         return rec
       }
 
-      reply = stripSelfPrefix(applyStyle(raw, ctx, styleBias(mods)))
+      // 每条 reply 独立样式，保持"每条一条消息"的工具边界；未走工具则整段兜底。
+      const segs = tools.context.sentByTool && tools.context.sentTexts.length
+        ? tools.context.sentTexts
+        : [raw]
+      const styled = segs.map(s => stripSelfPrefix(applyStyle(s, ctx, styleBias(mods))))
+      reply = styled.join('\n')
       if (config.humanlike.profanity.hardBlock) {
         const cleaned = limitProfanity(reply, config.humanlike.profanity.replace)
         if (cleaned !== reply) {
@@ -204,16 +209,13 @@ export class AgentRuntime {
         return rec
       }
 
-      const finalReply = tools.context.sentByTool
-        ? tools.context.sentTexts.join('\n')
-        : reply
-      reply = finalReply
+      const finalReply = reply
       if (!finalReply) {
         status = 'skipped'
         return rec
       }
 
-      const segments = await this.sendSegments(thread, finalReply, runId)
+      const segments = await this.sendSegments(thread, styled, runId)
 
       this.emit({
         type: 'assistant.message', thread: key, runId,
@@ -252,20 +254,10 @@ export class AgentRuntime {
     }
   }
 
-  private async sendSegments(thread: ThreadRef, reply: string, runId: string): Promise<string[]> {
+  private async sendSegments(thread: ThreadRef, segments: string[], runId: string): Promise<string[]> {
     const ty = config.humanlike.typing
-    let segments = ty.onNewline
-      ? reply.split('\n').map(s => s.trimEnd())
-      : [reply]
-    const maxSegChars = config.humanlike.style.maxSegmentChars
-    if (maxSegChars > 0) segments = segments.flatMap(s => splitLongSegment(s, maxSegChars))
-    const maxSeg = ty.maxSegments > 0 ? Math.max(1, ty.maxSegments) : 0
-    if (maxSeg > 0 && segments.length > maxSeg) {
-      const head = segments.slice(0, maxSeg - 1)
-      const tail = segments.slice(maxSeg - 1).filter(s => s.trim() !== '')
-      segments = [...head, tail.join('\n')]
-    }
-    const kept = segments.filter(s => ty.keepBlank || s.trim() !== '')
+    // 工具格式分割：每条 reply = 一条消息，原样发送，程序不再按长度/条数拆分。
+    const kept = segments.map(s => s.trimEnd()).filter(s => ty.keepBlank || s.trim() !== '')
     const total = kept.length
     let i = 0
     for (const seg of kept) {

@@ -120,11 +120,17 @@ export const config = {
     // 群里被这样的词叫时会被唤醒（逗号分隔，命中即视为 @✓）
     wakeWords: (process.env.PERSONA_WAKE_WORDS || '崽种,qq,机器人').split(',').map(s => s.trim()).filter(Boolean),
     // 系统提示模板({name} / {friend} / {rag} 会被替换)
-    // 极简身份认同：只确立"你就是{name}本人"，不写任何行为约束/风格描述——
-    // 约束性文字（挑着回/不总结/别照抄/别复述）会诱导模型过度执行甚至反向强化。
-    // 行为决策（回不回/多长/几条/冷却）全在外部系统；风格靠数据（真实原话）自然带出。
-    systemPromptTemplate: envJson('PERSONA_SYSTEM_PROMPT', `你是{name}，一个真实的人。
-{rag}`),
+    // SOUL.md 人格文件（身份+行为规范，Hermes 式）优先；PERSONA_SYSTEM_PROMPT env 可覆盖。
+    // 行为决策（回不回/冷却/静默）全在外部系统；措辞规范在 SOUL（长度/废话/不确定直说）。
+    systemPromptTemplate: envJson('PERSONA_SYSTEM_PROMPT', (() => {
+      const soulPath = join(dirname(fileURLToPath(import.meta.url)), 'SOUL.md')
+      if (existsSync(soulPath)) {
+        const s = readFileSync(soulPath, 'utf8').trim()
+        if (s) return s
+      }
+      return `你是{name}，一个真实的人。
+{rag}`
+    })()),
     // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
     demoDialogs: envJson('PERSONA_DEMO_DIALOGS', ''),
     // 私聊专用 system prompt 模板（不配则用上面通用模板）

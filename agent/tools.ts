@@ -107,20 +107,20 @@ export function createMemoryExecutors(sceneKey: string): Record<string, ToolExec
 }
 
 /**
- * reply 工具：模型主动开口说一句（可多次，一次一句，天然短句分条）。
- * 不调用 = 选择沉默（真人挑话接）。
+ * reply 工具：模型开口说一句。可一次返回多条（一次响应里多次调用），
+ * 每条就是一条消息——按工具格式分割，程序不再拆分。
  */
 export const REPLY_TOOL: ToolSpec = {
   type: 'function',
   function: {
     name: 'reply',
     description:
-      '开口说一句话。回复必须走这个工具：想说话就调用它，一次一句短句；' +
-      '可以连续调用多次，分几条说。不想接这轮话题就什么都不调用、直接结束（沉默）。',
+      '开口说一句话。要说话就调用它；想分几条说就连续调用几次，每次一条消息（按条发送，不要用换行拼成一条）。' +
+      '内容直接是你要对朋友说的话，像真人打字，别带序号/引号。',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: '要说的一句话（短句，像真人打字，别带序号/引号）' },
+        text: { type: 'string', description: '要说的话（一条消息，像真人打字，别带序号/引号）' },
       },
       required: ['text'],
     },

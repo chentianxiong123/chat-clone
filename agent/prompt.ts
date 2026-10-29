@@ -2,11 +2,10 @@ import { config } from './config.js'
 import type { SceneType } from './core.js'
 
 /**
- * 构建 system prompt（纯静态：身份 + 工具存在性说明）。
- * 刻意不嵌 RAG、不写任何行为约束/风格诱导——LLM 给什么都会在意，
- * 约束性文字（"挑着回/不总结/别照抄/别复述"）会让模型过度执行甚至反向强化。
- * 行为决策（回不回、多长、几条、冷却、主动冒泡）全部由外部系统（代码）控制；
- * LLM 上下文只留：稳定身份 + 客观数据（历史、工具返回的真实原话）。
+ * 构建 system prompt（成熟 agent 稳定前缀结构，参照 OpenClaw/Hermes）：
+ *   [身份行 + 行为规范（SOUL.md）] → [工具契约] → [回复契约]
+ * 全部静态、字节级稳定（服务端 KV 前缀缓存命中）；不嵌 RAG、不注入动态状态。
+ * 行为决策（回不回/冷却/静默）由外部系统控制；措辞规范在 SOUL（长度匹配/防废话/不确定直说）。
  */
 export function buildSystemPrompt(scene?: SceneType): string {
   const template = scene === 'private' && config.persona.privateSystemPromptTemplate
@@ -25,12 +24,18 @@ export function buildSystemPrompt(scene?: SceneType): string {
     }
   }
 
-  // 工具存在性说明：只告诉有哪些工具、干什么用的，不写"想不想用/该不该用/别照抄"——
-  // 那是决策，交给外部系统；模型只负责用工具产出内容。
+  // 工具契约：工具是唯一行动方式（MUST use tools），精确名调用。
+  // reply 一次可返回多条，每条就是一条消息——按工具格式分割，不靠程序切。
   prompt += `
-可用工具：
-- reply(text)：输出你说的话（一次一句，可多次）。
-- search_past_memory(query)：查你真实说过的原话。
-- remember(note)：记住关于朋友的稳定事实/喜好/约定。`
+## 工具
+工具是唯一行动方式，名字精确调用：
+- reply(text)：开口说一句。可一次返回多条，每条就是一条消息（按条发送，不拆分）。
+- search_past_memory(query)：唤醒记忆——查你真实说过的原话。
+- remember(note)：记住关于朋友的稳定事实/喜好/约定。
+
+## 回复
+- 要说话就调 reply，内容就是你对朋友说的话本身。
+- 想分几条说就调用几次 reply，每条一句；不要把几条拼成一条里用换行。
+- 回忆/确认往事先 search_past_memory；想不起就直说，不硬撑。`
   return prompt
 }
