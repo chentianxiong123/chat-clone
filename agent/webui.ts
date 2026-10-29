@@ -6,14 +6,17 @@ import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'
 import { ragImportInfo, ragSearch, ragStatus, searchRag } from './rag.js'
 import { buildSystemPrompt, buildStyleHintMessage } from './prompt.js'
-import { callLlmRaw, listModels, healthCheckAll } from './llm.js'
+import { callLlmRaw } from './llm.js'
 import { getUsageSummary } from './stats.js'
-import { getProvidersFile, getActiveProvider, setActiveProvider, listProviders, testProvider, getProvider, listEmbedProviders } from './models.js'
+import { getActiveProvider, listProviders, listEmbedProviders } from './domain/models/index.js'
 import { listSceneSummaries } from './memory.js'
-import { fileURLToPath } from 'node:url'
+import { paths } from './paths.js'
+import { json, readBody } from './transport/http/http.js'
+import { Router } from './transport/http/router.js'
+import { registerModelsRoutes } from './transport/http/routes/models.js'
 
-const WEB_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'web')
-const ENV_PATH = join(fileURLToPath(new URL('.', import.meta.url)), '.env')
+const WEB_DIR = paths.web
+const ENV_PATH = paths.env
 
 // ── 配置预设模板（只改行为/节律相关键，保留密钥与基础设施配置）──
 const PRESET_DEFAULTS: Record<string, string> = {
@@ -117,11 +120,17 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 
   // 直接发一帧初始 log 让前端拿到已有 buffer（此时为空，之后靠 SSE 增量）
 
+  const router = new Router()
+  registerModelsRoutes(router)
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const path = decodeURIComponent(url.pathname)
 
     try {
+      // ── 模型管理（独立路由表）──
+      if (await router.dispatch({ req, res, url, path })) return
+
       // ── v2 控制台：事件流 ──
       if (path === '/api/v2/stream') {
         if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
@@ -370,10 +379,10 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, {
           rag,
           llm: {
-            model: activeP?.model ?? config.llm.model,
-            baseUrl: activeP?.baseUrl ?? config.llm.baseUrl,
+            model: activeP?.model ?? '',
+            baseUrl: activeP?.baseUrl ?? '',
             provider: activeP?.name ?? 'default',
-            configured: !!activeP?.apiKey || !!config.llm.apiKey,
+            configured: !!activeP?.apiKey,
           },
           models: {
             providers: listProviders().map(p => ({ id: p.id, name: p.name, model: p.model, active: activeP?.id === p.id })),
@@ -430,48 +439,6 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         ]
         const result = await callLlmRaw(messages)
         return json(res, 200, result)
-      }
-
-      // ── 模型列表（所有 provider）──
-      if (path === '/api/models') {
-        const providers = listProviders().map(p => ({
-          id: p.id,
-          name: p.name,
-          model: p.model,
-          baseUrl: p.baseUrl,
-          pricePerMIn: p.pricePerMIn,
-          pricePerMOut: p.pricePerMOut,
-          fallback: p.fallback ?? [],
-          active: getActiveProvider()?.id === p.id,
-        }))
-        return json(res, 200, {
-          active: getActiveProvider()?.id ?? null,
-          providers,
-          remote: await listModels(),
-        })
-      }
-
-      // ── 模型健康检查（全部 provider 发 ping）──
-      if (path === '/api/models/health') {
-        return json(res, 200, { health: await healthCheckAll() })
-      }
-
-      // ── 切换活跃模型 ──
-      if (path === '/api/models/switch' && req.method === 'POST') {
-        const body = await readBody(req)
-        const id = String(body.id || '')
-        const r = setActiveProvider(id)
-        if (!r.ok) return json(res, 400, { error: r.error })
-        return json(res, 200, { ok: true, active: r.active?.id })
-      }
-
-      // ── 测试单个 provider ──
-      if (path === '/api/models/test' && req.method === 'POST') {
-        const body = await readBody(req)
-        const id = String(body.id || '')
-        const spec = getProvider(id)
-        if (!spec) return json(res, 400, { error: 'unknown provider' })
-        return json(res, 200, { id, ...await testProvider(spec) })
       }
 
       // ── 模拟注入 ──
@@ -618,31 +585,6 @@ function serveStatic(path: string): string | null {
   if (!full.startsWith(WEB_DIR)) return null
   if (!existsSync(full) || statSync(full).isDirectory()) return null
   return full
-}
-
-function json(res: { writeHead: (code: number, h: Record<string, string>) => void; end: (s: string) => void }, code: number, obj: unknown): void {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(obj))
-}
-
-function readBody(req: { on: (e: 'data' | 'end', cb: (c?: unknown) => void) => void }, lim = 2 * 1024 * 1024): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (c: Buffer) => {
-      size += c.length
-      if (size > lim) { reject(new Error('body too large')); return }
-      chunks.push(c)
-    })
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8')
-        resolve(raw ? JSON.parse(raw) : {})
-      } catch (e) {
-        reject(new Error('bad json'))
-      }
-    })
-  })
 }
 
 function writeFileSyncSafe(path: string, content: string): void {

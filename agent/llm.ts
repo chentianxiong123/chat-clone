@@ -2,9 +2,9 @@ import OpenAI from 'openai'
 import { config } from './config.js'
 import { recordUsage } from './stats.js'
 import {
-  getActiveProvider, getProvider, listProviders, clientFor, testProvider, listModelsFor, getEmbedProvider,
+  getActiveProvider, getProvider, clientFor, getEmbedProvider,
   type ProviderSpec,
-} from './models.js'
+} from './domain/models/index.js'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -14,24 +14,18 @@ export interface ChatMessage {
 
 function priceFor(p: ProviderSpec): { in: number; out: number } {
   return {
-    in: typeof p.pricePerMIn === 'number' ? p.pricePerMIn : config.llm.pricePerMIn,
-    out: typeof p.pricePerMOut === 'number' ? p.pricePerMOut : config.llm.pricePerMOut,
+    in: p.pricePerMIn ?? 0,
+    out: p.pricePerMOut ?? 0,
   }
 }
 
 /** 按 provider 价格表计算一次调用的费用（元） */
 export function calcLlmCost(tokensIn: number, tokensOut: number): number {
   const active = getActiveProvider()
-  const price = active ? priceFor(active) : { in: config.llm.pricePerMIn, out: config.llm.pricePerMOut }
+  if (!active) return 0
+  const price = priceFor(active)
   if (!price.in && !price.out) return 0
   return (tokensIn / 1_000_000) * price.in + (tokensOut / 1_000_000) * price.out
-}
-
-interface ProviderHealth {
-  id: string
-  ok: boolean
-  latencyMs: number
-  error?: string
 }
 
 export interface LlmResult {
@@ -57,8 +51,8 @@ export async function callLlmWithProviders(messages: ChatMessage[], opts: {
     const p = getProvider(fb)
     if (p && p.enabled !== false && !chain.some(x => x.id === p.id)) chain.push(p)
   }
-  const maxTokens = opts.maxTokens ?? active.maxTokens ?? config.llm.maxTokens
-  const temperature = opts.temperature ?? active.temperature ?? config.llm.temperature
+  const maxTokens = opts.maxTokens ?? active.maxTokens ?? 2048
+  const temperature = opts.temperature ?? active.temperature ?? 1
   const attempts = opts.attempts ?? config.llm.retryAttempts
 
   for (const p of chain) {
@@ -159,8 +153,8 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
     const p = getProvider(fb)
     if (p && p.enabled !== false && !chain.some(x => x.id === p.id)) chain.push(p)
   }
-  const maxTokens = opts.maxTokens ?? active.maxTokens ?? config.llm.maxTokens
-  const temperature = opts.temperature ?? active.temperature ?? config.llm.temperature
+  const maxTokens = opts.maxTokens ?? active.maxTokens ?? 2048
+  const temperature = opts.temperature ?? active.temperature ?? 1
   const maxIter = Math.max(1, opts.maxIter ?? 2)
   const base = messages.map(m => ({ role: m.role, content: m.content }))
 
@@ -268,25 +262,6 @@ export async function callLlmRaw(messages: ChatMessage[], maxTokensOverride?: nu
   const resp = await callLlmWithProviders(messages, { maxTokens: maxTokensOverride })
   if (resp.text) return { ok: true, text: resp.text, providerId: resp.providerId }
   return { ok: false, error: `所有 provider 均失败（last active=${getActiveProvider()?.id}）`, providerId: resp.providerId }
-}
-
-/** 列出所有 provider 的模型（WebUI 模型选择用） */
-export async function listModels(): Promise<Array<{ providerId: string; providerName: string; models: Array<{ id: string }> }>> {
-  const out: Array<{ providerId: string; providerName: string; models: Array<{ id: string }> }> = []
-  for (const p of listProviders()) {
-    out.push({ providerId: p.id, providerName: p.name, models: await listModelsFor(p) })
-  }
-  return out
-}
-
-/** 全部 provider 健康探测 */
-export async function healthCheckAll(): Promise<ProviderHealth[]> {
-  const specs = listProviders()
-  const health = await Promise.all(specs.map(async p => {
-    const r = await testProvider(p)
-    return { id: p.id, ok: r.ok, latencyMs: r.latencyMs, error: r.error }
-  }))
-  return health
 }
 
 /** 文本向量化（RAG 检索用），返回 1024 维向量 */

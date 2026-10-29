@@ -4,7 +4,7 @@ raw/
 chat_records/
 
 # Models, adapters, and compiled binaries
-models/
+/models/
 adapters/
 bin/
 llama-server-src/
