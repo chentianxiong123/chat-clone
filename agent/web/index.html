@@ -22,6 +22,7 @@
       <button class="side-item" data-page="chat" title="实时聊天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2.5-2.5A8 8 0 1 1 21 12z"/></svg><span>聊天</span></button>
       <button class="side-item" data-page="persona" title="人设"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg><span>人设</span></button>
       <button class="side-item" data-page="kb" title="RAG 记忆库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2zM4 19a2 2 0 0 0 2 2h14"/></svg><span>RAG</span></button>
+      <button class="side-item" data-page="models" title="模型管理"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 3-3 3-3-3zM12 8l3 3-3 3-3-3zM12 14l3 3-3 3-3-3z"/><path d="M12 2v18M5 8h14M5 14h14"/></svg><span>模型</span></button>
       <button class="side-item" data-page="stats" title="统计"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 4-8"/></svg><span>统计</span></button>
       <button class="side-item" data-page="logs" title="日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>日志</span></button>
       <button class="side-item" data-page="config" title="配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1l2.1-2.1M17 7l2.1-2.1"/></svg><span>配置</span></button>
@@ -78,7 +79,7 @@
 
       <div class="glass round-2xl p-5 mt-4">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">会话列表 <span class="text-[10px] text-slate-500 font-normal">真群 / 模拟群 · 点击进入聊天</span></div>
+          <div class="text-sm font-semibold">会话列表 <span class="text-[10px] text-slate-500 font-normal">真群 · 点击进入聊天</span></div>
           <button id="ov-goto-chat" class="btn btn-xs btn-ghost">去聊天页 →</button>
         </div>
         <div id="group-list" class="space-y-1"></div>
@@ -182,6 +183,48 @@
 
     <!-- ══ 人设 ══ -->
     <section id="page-persona" class="page">
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">人格配置
+            <span class="text-[10px] text-slate-500 font-normal ml-2">PERSONA_* · 保存写回 .env，重启 agent 生效</span>
+          </div>
+          <button id="persona-save" class="btn btn-sm btn-primary">保存</button>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4 text-xs">
+          <div class="space-y-3">
+            <label class="block"><span class="text-slate-500">姓名</span>
+              <input id="pf-name" class="input input-sm input-bordered w-full mt-1"></label>
+            <label class="block"><span class="text-slate-500">称呼朋友</span>
+              <input id="pf-friend" class="input input-sm input-bordered w-full mt-1"></label>
+            <label class="block"><span class="text-slate-500">唤醒词（逗号分隔）</span>
+              <input id="pf-wake" class="input input-sm input-bordered w-full mt-1" placeholder="崽种,qq,机器人"></label>
+          </div>
+          <div class="space-y-3">
+            <label class="block"><span class="text-slate-500">系统提示词模板（{name}/{friend}/{rag} 占位）</span>
+              <textarea id="pf-sys" rows="4" class="textarea textarea-bordered w-full mt-1 font-mono text-[11px]"></textarea></label>
+            <label class="block"><span class="text-slate-500">私聊专用系统提示词（留空=通用）</span>
+              <textarea id="pf-sys-pri" rows="2" class="textarea textarea-bordered w-full mt-1 font-mono text-[11px]"></textarea></label>
+          </div>
+        </div>
+        <label class="block mt-3 text-xs"><span class="text-slate-500">few-shot 示例（每行一组 user/assistant，RAG 注入前导）</span>
+          <textarea id="pf-shots" rows="3" class="textarea textarea-bordered w-full mt-1 font-mono text-[11px]"></textarea></label>
+        <div id="persona-save-note" class="mt-2 text-xs text-emerald-400"></div>
+      </div>
+
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">行为预设
+            <span class="text-[10px] text-slate-500 font-normal ml-2">触发/节律/近期状态 · 自动备份 .env，重启生效</span>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <select id="cfg-preset" class="select select-sm select-bordered"></select>
+          <button id="cfg-apply-preset" class="btn btn-sm btn-primary">应用模板</button>
+          <button id="cfg-reset" class="btn btn-sm btn-ghost">恢复默认</button>
+          <span id="cfg-preset-note" class="text-xs text-slate-500"></span>
+        </div>
+      </div>
+
       <div class="grid lg:grid-cols-2 gap-4">
         <div class="glass round-2xl p-5">
           <div class="text-sm font-semibold mb-3">当前人设</div>
@@ -245,6 +288,23 @@
         <div id="rag-meta" class="mt-2 text-xs text-slate-500"></div>
       </div>
       <div id="rag-results" class="grid md:grid-cols-3 gap-4"></div>
+    </section>
+
+    <!-- ══ 模型管理 ══ -->
+    <section id="page-models" class="page">
+      <div class="glass round-2xl p-5">
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-sm font-semibold">模型管理
+            <span class="text-[10px] text-slate-500 font-normal ml-2">runtime 热切换，无需重启 · providers.json 唯一来源</span>
+          </div>
+          <div class="flex gap-2">
+            <button id="model-refresh" class="btn btn-sm btn-ghost">刷新</button>
+            <button id="model-check" class="btn btn-sm btn-outline">健康检查</button>
+          </div>
+        </div>
+        <div id="model-panels" class="grid md:grid-cols-2 gap-3 mt-3"></div>
+        <div id="model-note" class="mt-3 text-xs text-emerald-400"></div>
+      </div>
     </section>
 
     <!-- ══ 统计 ══ -->
@@ -327,33 +387,34 @@
     <section id="page-config" class="page">
       <div class="glass round-2xl p-5 mb-4">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">模型管理（runtime 热切换，无需重启）</div>
-          <div class="flex gap-2">
-            <button id="model-refresh" class="btn btn-sm btn-ghost">刷新</button>
-            <button id="model-check" class="btn btn-sm btn-outline">健康检查</button>
+          <div class="text-sm font-semibold">服务配置
+            <span class="text-[10px] text-slate-500 font-normal ml-2">连接 / 端口 / 真群 · 保存写回 .env，重启 agent 生效</span>
           </div>
+          <button id="svc-save" class="btn btn-sm btn-primary">保存</button>
         </div>
-        <div id="model-panels" class="grid md:grid-cols-2 gap-3 mt-2"></div>
-        <div id="model-note" class="mt-3 text-xs text-emerald-400"></div>
+        <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 text-xs">
+          <label class="block"><span class="text-slate-500">NapCat 主机</span>
+            <input id="svc-napcat-host" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">NapCat 端口</span>
+            <input id="svc-napcat-port" type="number" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">WebUI 主机</span>
+            <input id="svc-webui-host" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">WebUI 端口</span>
+            <input id="svc-webui-port" type="number" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">真群号（逗号分隔，其余为模拟群）</span>
+            <input id="svc-real-groups" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">模拟线程上限</span>
+            <input id="svc-sim-max" type="number" class="input input-sm input-bordered w-full mt-1"></label>
+        </div>
+        <div id="svc-note" class="mt-3 text-xs text-emerald-400"></div>
       </div>
+
       <div class="glass round-2xl p-5">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">agent/.env（改完重启生效）</div>
-          <div class="flex gap-2">
-            <button id="cfg-reload" class="btn btn-sm btn-ghost">重新读取</button>
-            <button id="cfg-save" class="btn btn-sm btn-primary">保存</button>
-          </div>
+          <div class="text-sm font-semibold">当前生效配置 <span class="text-[10px] text-slate-500 font-normal ml-2">只读 · RAG/人格/模型配置在各自主页</span></div>
+          <button id="cfg-reload" class="btn btn-sm btn-ghost">刷新</button>
         </div>
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-          <span class="text-xs text-slate-500">预设模板</span>
-          <select id="cfg-preset" class="select select-sm select-bordered"></select>
-          <button id="cfg-apply-preset" class="btn btn-sm btn-primary">应用模板</button>
-          <button id="cfg-reset" class="btn btn-sm btn-ghost">恢复默认</button>
-          <span id="cfg-preset-note" class="text-xs text-slate-500"></span>
-        </div>
-        <textarea id="cfg-editor" class="textarea textarea-bordered w-full h-[50vh] font-mono text-xs" spellcheck="false"></textarea>
-        <div id="cfg-note" class="mt-2 text-xs text-emerald-400"></div>
-        <div id="active-config" class="mt-4"></div>
+        <div id="active-config" class="mt-2"></div>
       </div>
     </section>
 

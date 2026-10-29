@@ -532,6 +532,46 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { ok: true, note: '配置已保存，重启 agent 后生效' })
       }
 
+      // ── 服务配置（NapCat / WebUI / 真群）──
+      if (path === '/api/service/config' && req.method === 'GET') {
+        return json(res, 200, {
+          ok: true,
+          napcat: { host: config.napcat.host, port: config.napcat.port },
+          webui: { host: config.webui.host, port: config.webui.port },
+          sim: { realGroups: config.sim.realGroups, maxThreads: config.sim.maxThreads },
+        })
+      }
+      if (path === '/api/service/config' && req.method === 'POST') {
+        const body = await readBody(req)
+        const patch: Record<string, string> = {}
+        if (typeof body.napcatHost === 'string' && body.napcatHost.trim()) patch.NAPCAT_HOST = body.napcatHost.trim()
+        if (body.napcatPort != null) patch.NAPCAT_PORT = String(Math.max(1, Math.round(Number(body.napcatPort) || 1)))
+        if (typeof body.webuiHost === 'string' && body.webuiHost.trim()) patch.WEBUI_HOST = body.webuiHost.trim()
+        if (body.webuiPort != null) patch.WEBUI_PORT = String(Math.max(1, Math.round(Number(body.webuiPort) || 1)))
+        if (typeof body.realGroups === 'string') patch.SIM_REAL_GROUPS = body.realGroups.split(',').map(s => s.trim()).filter(Boolean).join(',')
+        if (body.simMax != null) patch.SIM_MAX_THREADS = String(Math.max(1, Math.round(Number(body.simMax) || 1)))
+        if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: '无有效字段' })
+        const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+        writeEnvWithBackup(applyEnvPatch(raw, patch))
+        return json(res, 200, { ok: true, note: `已写回 .env：${Object.keys(patch).join('、')}（重启 agent 生效）` })
+      }
+
+      // ── 人格配置（PERSONA_*，多行字段 JSON 单行编码）──
+      if (path === '/api/persona/config' && req.method === 'POST') {
+        const body = await readBody(req)
+        const patch: Record<string, string> = {}
+        if (typeof body.name === 'string') patch.PERSONA_NAME = body.name
+        if (typeof body.friendName === 'string') patch.PERSONA_FRIEND = body.friendName
+        if (typeof body.wakeWords === 'string') patch.PERSONA_WAKE_WORDS = body.wakeWords
+        if (typeof body.systemPrompt === 'string') patch.PERSONA_SYSTEM_PROMPT = JSON.stringify(body.systemPrompt)
+        if (typeof body.privateSystemPrompt === 'string') patch.PERSONA_PRIVATE_SYSTEM_PROMPT = JSON.stringify(body.privateSystemPrompt)
+        if (typeof body.demoDialogs === 'string') patch.PERSONA_DEMO_DIALOGS = JSON.stringify(body.demoDialogs)
+        if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: '无有效字段' })
+        const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+        writeEnvWithBackup(applyEnvPatch(raw, patch))
+        return json(res, 200, { ok: true, note: `已写回 .env：${Object.keys(patch).join('、')}（重启 agent 生效）` })
+      }
+
       // ── /console 兼容入口：统一进主控制台聊天页 ──
       if (path === '/console') {
         res.writeHead(302, { Location: '/#chat' })

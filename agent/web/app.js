@@ -29,8 +29,10 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     if (page === 'chat') history.replaceState(null, '', '#chat')
     else if (location.hash) history.replaceState(null, '', location.pathname + location.search)
     if (page === 'stats') loadStats(currentRange)
-    if (page === 'persona') { loadPersona(); loadMemory() }
+    if (page === 'persona') { loadPersona(); loadMemory(); loadPersonaForm(); loadPresets() }
     if (page === 'kb') void loadRagInfo()
+    if (page === 'models') loadModels()
+    if (page === 'config') { loadConfig(); loadServiceConfig() }
     if (page === 'overview') void loadThreadOverview()
   })
 })
@@ -129,8 +131,9 @@ async function loadThreadOverview() {
     const j = await r.json()
     const ts = j.threads || []
     const totals = j.totals || {}
-    $('ov-groups').textContent = String(totals.threads ?? ts.length)
-    $('ov-dialog').textContent = String(totals.messages ?? 0)
+    const realTs = ts.filter(t => t.channel === 'qq')
+    $('ov-groups').textContent = String(realTs.filter(t => !t.archived).length)
+    $('ov-dialog').textContent = String(realTs.reduce((a, t) => a + (t.messageCount || 0), 0))
     const list = $('group-list')
     if (!list) return
     if (!ts.length) {
@@ -138,14 +141,13 @@ async function loadThreadOverview() {
       return
     }
     const real = ts.filter(t => t.channel === 'qq' && !t.archived)
-    const sims = ts.filter(t => t.channel === 'sim' && !t.archived)
-    const arch = ts.filter(t => t.archived)
+    const arch = ts.filter(t => t.channel === 'qq' && t.archived)
     const row = (t) => `
       <div class="flex items-center justify-between p-2 rounded-xl border border-white/5 hover:bg-white/5 transition" data-thread="${esc(t.id)}" role="button">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <span class="text-[11px] font-bold ${t.channel === 'qq' ? 'text-indigo-300' : 'text-slate-300'}">${t.channel === 'qq' ? '真群' : (t.kind === 'group' ? '模拟群' : '模拟私聊')}</span>
-            <span class="font-mono text-[12px] ${t.channel === 'qq' ? 'text-indigo-200' : 'text-slate-200'}">${esc(t.externalId)}</span>
+            <span class="text-[11px] font-bold text-indigo-300">真群</span>
+            <span class="font-mono text-[12px] text-indigo-200">${esc(t.externalId)}</span>
             ${t.paused ? '<span class="pill bg-amber-500/15 text-amber-300">暂停</span>' : ''}
           </div>
           <div class="text-[10px] text-slate-500 truncate mt-0.5">${esc(t.lastPreview || '（暂无消息）')}</div>
@@ -158,8 +160,8 @@ async function loadThreadOverview() {
     const head = (label, cls) => `<div class="px-1 pt-2 pb-1 text-[10px] uppercase tracking-widest font-semibold ${cls}">${label}</div>`
     let html = ''
     if (real.length) html += head('真群', 'text-indigo-400') + real.map(row).join('')
-    if (sims.length) html += head('模拟群', 'text-slate-500') + sims.map(row).join('')
     if (arch.length) html += head('已归档', 'text-slate-600') + arch.map(row).join('')
+    if (!real.length && !arch.length) html = '<div class="p-6 text-center text-slate-500 text-sm">还没有真群会话</div>'
     list.innerHTML = html
     list.querySelectorAll('[data-thread]').forEach(el => {
       el.addEventListener('click', () => {
@@ -586,8 +588,67 @@ function rankRow(name, val, sub, n, max) {
 async function loadConfig() {
   const r = await fetch('/api/config')
   const res = await r.json()
-  $('cfg-editor').value = res.env
   if (res.active) renderActiveConfig(res.active, res.rag, res.profileMeta)
+}
+
+// ── 服务配置 ──
+async function loadServiceConfig() {
+  const r = await fetch('/api/service/config')
+  const res = await r.json()
+  if (!res.ok) return
+  $('svc-napcat-host').value = res.napcat?.host || ''
+  $('svc-napcat-port').value = res.napcat?.port ?? ''
+  $('svc-webui-host').value = res.webui?.host || ''
+  $('svc-webui-port').value = res.webui?.port ?? ''
+  $('svc-real-groups').value = (res.sim?.realGroups || []).join(',')
+  $('svc-sim-max').value = res.sim?.maxThreads ?? ''
+}
+async function saveServiceConfig() {
+  const body = {
+    napcatHost: $('svc-napcat-host').value.trim(),
+    napcatPort: Number($('svc-napcat-port').value),
+    webuiHost: $('svc-webui-host').value.trim(),
+    webuiPort: Number($('svc-webui-port').value),
+    realGroups: $('svc-real-groups').value.trim(),
+    simMax: Number($('svc-sim-max').value),
+  }
+  const r = await fetch('/api/service/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const res = await r.json()
+  const note = $('svc-note')
+  note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
+  note.className = 'text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
+}
+
+// ── 人格配置 ──
+async function loadPersonaForm() {
+  const r = await fetch('/api/status')
+  const res = await r.json()
+  const p = res.persona || {}
+  $('pf-name').value = p.name || ''
+  $('pf-friend').value = p.friendName || ''
+  $('pf-wake').value = Array.isArray(p.wakeWords) ? p.wakeWords.join(',') : (p.wakeWords || '')
+  $('pf-sys').value = p.systemPromptTemplate || ''
+  $('pf-sys-pri').value = p.privateSystemPromptTemplate || ''
+  $('pf-shots').value = Array.isArray(p.demoDialogs) ? p.demoDialogs.join('\n') : (p.demoDialogs || '')
+}
+async function savePersonaConfig() {
+  const body = {
+    name: $('pf-name').value.trim(),
+    friendName: $('pf-friend').value.trim(),
+    wakeWords: $('pf-wake').value.trim(),
+    systemPrompt: $('pf-sys').value,
+    privateSystemPrompt: $('pf-sys-pri').value,
+    demoDialogs: $('pf-shots').value,
+  }
+  const r = await fetch('/api/persona/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const res = await r.json()
+  const note = $('persona-save-note')
+  note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
+  note.className = 'text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
 }
 
 async function loadPresets() {
@@ -608,13 +669,9 @@ async function postConfigAction(path, body) {
   })
   const res = await r.json()
   const note = $('cfg-preset-note')
-  if (res.ok) {
-    if (typeof res.env === 'string') $('cfg-editor').value = res.env
-    note.textContent = '✓ ' + res.note
-    note.className = 'text-xs text-emerald-400'
-  } else {
-    note.textContent = '❌ ' + (res.error || '操作失败')
-    note.className = 'text-xs text-red-400'
+  if (note) {
+    note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '操作失败')
+    note.className = 'text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
   }
 }
 
@@ -698,28 +755,19 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       </div>
     </div>`
 }
-$('cfg-reload').addEventListener('click', () => { $('cfg-preset-note').textContent = ''; loadConfig() })
-$('cfg-apply-preset').addEventListener('click', () => {
+$('cfg-reload').addEventListener('click', () => { loadConfig(); loadServiceConfig() })
+$('cfg-apply-preset')?.addEventListener('click', () => {
   const name = $('cfg-preset').value
   if (!name) return
   if (!confirm('将修改 .env 中相关配置项（自动备份），重启后生效。继续？')) return
   void postConfigAction('/api/config/preset', { name })
 })
-$('cfg-reset').addEventListener('click', () => {
+$('cfg-reset')?.addEventListener('click', () => {
   if (!confirm('恢复默认的触发/节律/近期状态配置（自动备份，保留密钥与其他配置）。继续？')) return
   void postConfigAction('/api/config/reset')
 })
-$('cfg-save').addEventListener('click', async () => {
-  const env = $('cfg-editor').value
-  const r = await fetch('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ env }),
-  })
-  const res = await r.json()
-  const note = $('cfg-note')
-  note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
-})
+$('svc-save')?.addEventListener('click', () => { void saveServiceConfig() })
+$('persona-save')?.addEventListener('click', () => { void savePersonaConfig() })
 
 function pct2(v) { return Math.round((v || 0) * 100) + '%' }
 const fmtMoney = (v) => (v || 0).toFixed(v > 10 ? 0 : v > 0.1 ? 1 : 2)
@@ -843,5 +891,8 @@ setInterval(() => { $('footer-time').textContent = new Date().toLocaleTimeString
 // 首次状态（SSE 会推，兜底拉一次）
 fetch('/api/state').then((r) => r.json()).then((snap) => renderState(snap)).catch(() => {})
 
-// 支持 /console 跳转后直接打开聊天页
+// 当前页对应数据（/console 或带 hash 进入）
+const curPage = document.querySelector('.side-item.active')?.dataset.page
+if (curPage === 'config') loadServiceConfig()
+if (curPage === 'persona') { loadPersonaForm(); loadPresets() }
 if (location.hash === '#chat') document.querySelector('.side-item[data-page="chat"]')?.click()

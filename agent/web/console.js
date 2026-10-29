@@ -51,11 +51,13 @@ async function api(path, opts) {
 async function boot() {
   try { S.status = await api('/api/status') } catch { /* ignore */ }
   await loadThreads()
-  const firstSim = S.threads.find(t => t.channel === 'sim' && t.kind === 'group')
+  const firstReal = S.threads.find(t => t.channel === 'qq' && !t.archived)
+  const first = firstReal
+    || S.threads.find(t => t.channel === 'sim' && !t.archived)
     || S.threads.find(t => t.channel === 'sim')
     || S.threads[0]
-  if (firstSim) {
-    await openThread(firstSim.id)
+  if (first) {
+    await openThread(first.id)
   } else {
     await newSimGroup(undefined, true)
   }

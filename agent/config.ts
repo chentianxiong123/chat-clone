@@ -13,6 +13,13 @@ function envNum(name: string, def: number): number {
   return Number.isFinite(n) ? n : def
 }
 
+/** 读可能含换行的环境变量：写入时用 JSON.stringify 单行编码（见 /api/persona/config），读取时解码 */
+function envJson(name: string, def: string): string {
+  const v = process.env[name]
+  if (v === undefined || v === '') return def
+  try { return JSON.parse(v) } catch { return v }
+}
+
 /** "0.5,0.7,..." → number[] */
 function parseNumList(raw?: string): number[] {
   if (!raw) return []
@@ -113,15 +120,15 @@ export const config = {
     // 群里被这样的词叫时会被唤醒（逗号分隔，命中即视为 @✓）
     wakeWords: (process.env.PERSONA_WAKE_WORDS || '崽种,qq,机器人').split(',').map(s => s.trim()).filter(Boolean),
     // 系统提示模板({name} / {friend} / {rag} 会被替换)
-    systemPromptTemplate: process.env.PERSONA_SYSTEM_PROMPT || `你是{name}，在群里跟朋友聊天。
+    systemPromptTemplate: envJson('PERSONA_SYSTEM_PROMPT', `你是{name}，在群里跟朋友聊天。
 
 回复时尽量模仿下面你本人过往的真实聊天记录：语气、长度、用词、分条习惯都照着来，不要像助手，不要解释自己在模仿。
 
-{rag}`,
+{rag}`),
     // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
-    demoDialogs: process.env.PERSONA_DEMO_DIALOGS || '',
+    demoDialogs: envJson('PERSONA_DEMO_DIALOGS', ''),
     // 私聊专用 system prompt 模板（不配则用上面通用模板）
-    privateSystemPromptTemplate: process.env.PERSONA_PRIVATE_SYSTEM_PROMPT || '',
+    privateSystemPromptTemplate: envJson('PERSONA_PRIVATE_SYSTEM_PROMPT', ''),
   },
   // ── 消息处理 / 会话场景 ───────────────────────────────────────────────────
   batch: {
@@ -347,6 +354,8 @@ export const config = {
     defaultGroup: envNum('SIM_GROUP_DEFAULT', 900001),
     // 真群号列表（SIM_REAL_GROUPS，默认 719972557）：唯一真群，其余全是模拟群
     realGroups: (process.env.SIM_REAL_GROUPS || '719972557').split(',').map(s => Number(s.trim())).filter(Boolean),
+    // 活跃模拟线程上限（防测试时开太多；SIM_MAX_THREADS）
+    maxThreads: Math.max(1, Math.round(envNum('SIM_MAX_THREADS', 5))),
     reactMsMin: envNum('SIM_REACT_MS_MIN', 250),
     reactMsMax: envNum('SIM_REACT_MS_MAX', 1100),
     segGapMsMin: envNum('SIM_SEG_GAP_MIN_MS', 180),

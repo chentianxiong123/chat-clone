@@ -2,7 +2,7 @@ import { config } from '../config.js'
 import type { EventBus } from './bus.js'
 import type { AgentRuntime } from './runtime.js'
 import {
-  appendEvent, ensureThread, getThreadDetail, listEvents, listThreads, markRead, setArchived, setPaused,
+  appendEvent, ensureThread, getThreadDetail, getThreadMeta, listEvents, listThreads, markRead, setArchived, setPaused,
   threadMessageCounts, touchThread,
 } from './store.js'
 import {
@@ -236,6 +236,13 @@ export class Harness {
       : (id || 10001)
     if (kind === 'group' && !isSimGroupId(externalId)) {
       throw new Error(`群号 ${externalId} 是真群（SIM_REAL_GROUPS），不能创建为模拟群`)
+    }
+    const key = threadKey({ channel: 'sim', kind, externalId })
+    if (!getThreadMeta(key)) {
+      const activeSims = listThreads().filter(t => t.channel === 'sim' && !t.archived).length
+      if (activeSims >= config.sim.maxThreads) {
+        throw new Error(`模拟群已达上限 ${config.sim.maxThreads}（SIM_MAX_THREADS），请先归档/清理旧的`)
+      }
     }
     return ensureThread({ channel: 'sim', kind, externalId })
   }
