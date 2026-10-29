@@ -167,13 +167,32 @@ export interface RagResult {
 
 export async function searchRag(query: string): Promise<string> {
   const res = await ragSearch(query)
-  // 按策略优先级拼合：先用命中的那个路由
+  // ── 规范化多路召回规则 ──
+  //   主路由 = strategy 顺序第一个非空；主路=向量时按 vecMinScore 判质量：
+  //   达标 → 用向量；"召回不对"（最高分 < vecMinScore）→ 回退下一路由（fts→like）；
+  //   本地路由（fts/like）零成本、非空即用（有就比没有好）；
+  //   全部路由都"不对"或空 → 兜底取所有命中里最高分的路由（保证不空手而归）。
+  const byMethod = (m: string): RagHit[] =>
+    m === 'vec' ? res.vec : m === 'fts' ? res.fts : res.like
+  const topScore = (arr: RagHit[]): number =>
+    arr.length ? Math.max(...arr.map(h => h.score)) : 0
+
   let picked: RagHit[] = []
   for (const m of config.rag.strategy) {
-    if (m === 'vec' && res.vec.length) picked = res.vec
-    else if (m === 'fts' && res.fts.length) picked = res.fts
-    else if (m === 'like' && res.like.length) picked = res.like
-    if (picked.length) break
+    const arr = byMethod(m)
+    if (!arr.length) continue
+    // 向量是"花 API 钱"的路由：质量不达标（召回不对）→ 跳过，换下一路由
+    if (m === 'vec' && config.rag.vecMinScore > 0 && topScore(arr) < config.rag.vecMinScore) continue
+    picked = arr
+    break
+  }
+  // 兜底：所有路由都"召回不对"→ 取全部命中里最高分的路由
+  if (!picked.length) {
+    const all = [...res.vec, ...res.fts, ...res.like]
+    if (all.length) {
+      const mx = Math.max(...all.map(h => h.score))
+      picked = all.filter(h => h.score === mx)
+    }
   }
   if (!picked.length) return ''
   // 返回完整对话对（user=对方 + assistant=本人）：AI 看到"对方说→本人怎么接"的语境，

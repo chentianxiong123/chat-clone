@@ -101,6 +101,11 @@ export const config = {
     vecProb: clamp01(envNum('RAG_VEC_PROB', 0.3)),
     // 本地检索全空时是否强制升级向量兜底（保证有人格参考可给；false 则直接返回空）
     vecFallbackOnEmpty: process.env.RAG_VEC_FALLBACK === 'true',
+    // 向量召回质量门槛（余弦分 0~1）：主路=向量，最高分低于此视为"召回不对"→回退 fts/like
+    // 规范化多路召回规则：vec 达标用 vec；不达标换路；全差兜底取最高分
+    // 注：qwen3-embedding-0.6b 余弦分整体偏低，语义相关召回约 0.13~0.27，
+    // 明显无关约 <0.10；阈值取 0.10 能保住相关召回、只挡明显无关。
+    vecMinScore: clamp01(envNum('RAG_VEC_MIN_SCORE', 0.10)),
     // ── RAG 工具化（function call）──
     // 总开关：开启后不再每轮把 RAG 当 user 参考资料注入，改为工具按需调用
     toolsEnabled: process.env.RAG_TOOLS_ENABLED !== 'false',

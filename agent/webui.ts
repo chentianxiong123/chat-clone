@@ -327,6 +327,10 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           config.rag.vecFallbackOnEmpty = body.vecFallbackOnEmpty
           applied.push('vecFallbackOnEmpty'); patch.RAG_VEC_FALLBACK = String(body.vecFallbackOnEmpty)
         }
+        if (body.vecMinScore != null) {
+          const v = Math.max(0, Math.min(1, Number(body.vecMinScore)))
+          config.rag.vecMinScore = v; applied.push('vecMinScore'); patch.RAG_VEC_MIN_SCORE = String(v)
+        }
         if (typeof body.embedEnabled === 'boolean') {
           config.rag.embedEnabled = body.embedEnabled
           applied.push('embedEnabled'); patch.RAG_EMBED_ENABLED = String(body.embedEnabled)
