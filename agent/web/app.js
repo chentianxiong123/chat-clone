@@ -620,6 +620,15 @@ async function saveServiceConfig() {
   note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
   note.className = 'text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
 }
+async function archiveAllSim() {
+  const r = await fetch('/api/v2/threads/sim/archive-all', { method: 'POST' })
+  const res = await r.json()
+  const note = $('svc-archive-sim-note')
+  note.textContent = res.ok
+    ? (res.archived > 0 ? `已归档 ${res.archived} 个模拟群（不删数据，配额已释放）` : '没有需要归档的模拟群')
+    : '❌ ' + (res.error || '归档失败')
+  note.className = 'text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
+}
 
 // ── 人格配置 ──
 async function loadPersonaForm() {
@@ -767,6 +776,7 @@ $('cfg-reset')?.addEventListener('click', () => {
   void postConfigAction('/api/config/reset')
 })
 $('svc-save')?.addEventListener('click', () => { void saveServiceConfig() })
+$('svc-archive-sim')?.addEventListener('click', () => { void archiveAllSim() })
 $('persona-save')?.addEventListener('click', () => { void savePersonaConfig() })
 
 function pct2(v) { return Math.round((v || 0) * 100) + '%' }

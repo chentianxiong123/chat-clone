@@ -230,6 +230,19 @@ export class Harness {
     return meta
   }
 
+  /** 归档全部模拟群（测试素材）：只标记 archived=1，不删数据，释放 SIM_MAX_THREADS 配额 */
+  archiveAllSim(): number {
+    const sims = listThreads().filter(t => t.channel === 'sim' && !t.archived)
+    for (const t of sims) {
+      const timer = this.timers.get(t.id)
+      if (timer) { clearTimeout(timer); this.timers.delete(t.id) }
+      this.pending.delete(t.id)
+      setArchived(t.id, true)
+      this.emitStored({ type: 'thread.updated', thread: t.id, at: Date.now() })
+    }
+    return sims.length
+  }
+
   createSimThread(kind: 'group' | 'private', id?: number): ThreadMeta {
     const externalId = kind === 'group'
       ? (id ?? config.sim.defaultGroup)

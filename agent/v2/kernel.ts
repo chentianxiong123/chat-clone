@@ -74,6 +74,11 @@ export class AgentKernel {
     return this.harness.archiveThread(id, archived)
   }
 
+  /** 归档全部模拟群（测试素材）：只标记 archived=1，不删数据，释放配额 */
+  archiveAllSim(): number {
+    return this.harness.archiveAllSim()
+  }
+
   createSimThread(kind: 'group' | 'private', id?: number): ThreadMeta {
     return this.harness.createSimThread(kind, id)
   }

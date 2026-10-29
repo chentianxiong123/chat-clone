@@ -161,6 +161,11 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       }
 
       // ── v2 控制台：新建/确保模拟会话（真群号一律拒绝）──
+      if (path === '/api/v2/threads/sim/archive-all' && req.method === 'POST') {
+        const n = v2.archiveAllSim()
+        return json(res, 200, { ok: true, archived: n })
+      }
+
       if (path === '/api/v2/threads/sim' && req.method === 'POST') {
         if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
         const body = await readBody(req)
