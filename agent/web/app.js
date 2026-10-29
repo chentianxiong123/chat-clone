@@ -754,7 +754,7 @@ function renderModels() {
       : '未计费'
     const hTag = h
       ? (h.ok
-        ? `<span class="text-emerald-400">✓ ${fmtMs(h.latencyMs)}</span>`
+        ? `<span class="text-emerald-400">${h.kind === 'embed' ? '嵌入' : '对话'} ✓ ${fmtMs(h.latencyMs)}</span>`
         : `<span class="text-red-400">✗ ${esc((h.error || '').slice(0, 60))}</span>`)
       : '<span class="text-slate-500">未测</span>'
     return `<div class="glass round-xl p-4 ${isActive ? 'ring-1 ring-primary/50' : ''}">

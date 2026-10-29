@@ -6,20 +6,32 @@ export interface ProviderHealth {
   id: string
   ok: boolean
   latencyMs: number
+  kind: 'chat' | 'embed'
   error?: string
 }
 
-export async function testProvider(spec: ProviderSpec): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+/** 仅嵌入上游：配了 embedModel 且对话模型就是该嵌入模型（无独立 chat 模型） */
+function isEmbedOnly(spec: ProviderSpec): boolean {
+  return !!spec.embedModel && spec.embedModel === spec.model
+}
+
+export async function testProvider(spec: ProviderSpec): Promise<{ ok: boolean; latencyMs: number; kind: 'chat' | 'embed'; error?: string }> {
   const t0 = Date.now()
+  const kind: 'chat' | 'embed' = isEmbedOnly(spec) ? 'embed' : 'chat'
   try {
-    await clientFor(spec).chat.completions.create({
-      model: spec.model,
-      messages: [{ role: 'user', content: 'hi' }],
-      max_tokens: 5,
-    })
-    return { ok: true, latencyMs: Date.now() - t0 }
+    const client = clientFor(spec)
+    if (kind === 'embed') {
+      await client.embeddings.create({ model: spec.embedModel as string, input: 'ping' })
+    } else {
+      await client.chat.completions.create({
+        model: spec.model,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 5,
+      })
+    }
+    return { ok: true, latencyMs: Date.now() - t0, kind }
   } catch (e) {
-    return { ok: false, latencyMs: Date.now() - t0, error: (e as Error).message }
+    return { ok: false, latencyMs: Date.now() - t0, kind, error: (e as Error).message }
   }
 }
 
@@ -44,6 +56,6 @@ export async function healthCheckAll(): Promise<ProviderHealth[]> {
   const specs = listProviders()
   return Promise.all(specs.map(async p => {
     const r = await testProvider(p)
-    return { id: p.id, ok: r.ok, latencyMs: r.latencyMs, error: r.error }
+    return { id: p.id, ok: r.ok, latencyMs: r.latencyMs, kind: r.kind, error: r.error }
   }))
 }
