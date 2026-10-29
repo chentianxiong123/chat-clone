@@ -1,8 +1,7 @@
 import { config } from './config.js'
-import { callLlm, callLlmWithTools, type ChatMessage } from './llm.js'
-import { buildSystemPrompt, buildMemoryHintMessage, buildStyleHintMessage } from './prompt.js'
-import { searchRag } from './rag.js'
-import { MEMORY_TOOLS, createMemoryExecutors, needsRecall, searchMemoryNote } from './tools.js'
+import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
+import { buildSystemPrompt } from './prompt.js'
+import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
 import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
 import { limitProfanity } from './profanity.js'
@@ -13,7 +12,7 @@ import {
 } from './memory.js'
 import {
   loadState, saveState, resetState, onMessage, onReply, decayState, computeModifiers,
-  buildStateContextMessage, stateView, type RecentState, type RecentStateView, type StateModifiers,
+  buildStatePrompt, stateView, type RecentState, type RecentStateView, type StateModifiers,
 } from './state.js'
 
 export const BATCH_N = `${config.batch.nMin}~${config.batch.nMax}`
@@ -413,8 +412,6 @@ export class AgentCore {
 
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
-      // 人设参考：检索本人过往原话（只取 assistant 行），只用来模仿说话方式
-      const stylePromise = searchRag(ctx)
 
       // 反模板：最近自己回复里的过热词提醒（动态提示，放在历史之后，不破坏长前缀缓存）
       const ar = config.humanlike.antiRepeat
@@ -430,40 +427,46 @@ export class AgentCore {
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
 
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
-      // 累/忙/烦时更慢；状态消息在延迟后构建，尽量新鲜
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
-      let styleMsg: ChatMessage | null = null
-      try { styleMsg = buildStyleHintMessage(await stylePromise) } catch (e) { console.warn('[Core] RAG 人设检索失败:', (e as Error).message) }
 
-      // 记忆闸门：过去指代 或 主动回忆概率 → 预取一条"隐约记得"（system，不抢当前对话）
-      let memoryMsg: ChatMessage | null = null
-      if (config.rag.toolsEnabled && (needsRecall(ctx) || Math.random() < config.rag.recallProb)) {
-        const note = await searchMemoryNote(key, ctx)
-        memoryMsg = buildMemoryHintMessage(note)
-      }
-
-      const stateMsg = buildStateContextMessage(this.recentState)
+      // MCP 式工具化：模型按需调 reply/search_past_memory/remember/get_state，拿到结果再接着想。
+      // reply 工具攒句（可多次=短句分条）；模型不调 reply 且无 content = 沉默（真人挑话接）。
+      const toolReplies: string[] = []
+      const executors = createAgentExecutors(key, {
+        reply: async (text) => { toolReplies.push(text) },
+        getState: () => buildStatePrompt(this.recentState),
+      })
+      const llmTools: ToolSpec[] = [
+        ...MEMORY_TOOLS,
+        REPLY_TOOL,
+        ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
+      ]
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(styleMsg ? [styleMsg] : []),
         ...(arMsg ? [arMsg] : []),
-        ...(memoryMsg ? [memoryMsg] : []),
-        ...(stateMsg ? [stateMsg] : []),
         userMsg,
       ]
 
-      const raw = config.rag.toolsEnabled
-        ? (await callLlmWithTools(messages, {
-            tools: MEMORY_TOOLS,
-            executors: createMemoryExecutors(key),
-            maxIter: config.rag.toolMaxIter,
-          })).text
-        : await callLlm(messages)
+      let raw = ''
+      if (config.rag.toolsEnabled) {
+        const r = await callLlmWithTools(messages, {
+          tools: llmTools,
+          executors,
+          maxIter: config.agent.toolMaxIter,
+        })
+        raw = toolReplies.length ? toolReplies.join('\n') : r.text
+      } else {
+        raw = await callLlm(messages)
+      }
+      // 模型沉默（没调 reply 也没输出）→ 概率兜底补一句，否则真沉默
       if (!raw) {
-        console.log('[Core] LLM 无回复，跳过')
-        this.emit()
-        return
+        if (Math.random() < config.agent.silentReplyProb) raw = await callLlm(messages)
+        if (!raw) {
+          console.log(`[Core] ${key} 沉默（未调 reply）`)
+          this.emit()
+          return
+        }
       }
       // 话术风格后处理（表情/语气词/错字/长度收敛/回敬）
       let reply = stripSelfPrefix(applyStyle(raw, ctx, this.styleBias(mods)))
@@ -551,7 +554,6 @@ export class AgentCore {
     try {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
-      const stylePromise = searchRag(lastMsg)
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const ar = config.humanlike.antiRepeat
       const recent = this.recentReplies.get(key) ?? []
@@ -561,34 +563,38 @@ export class AgentCore {
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
-      let styleMsg: ChatMessage | null = null
-      try { styleMsg = buildStyleHintMessage(await stylePromise) } catch (e) { console.warn('[Core] RAG 人设检索失败:', (e as Error).message) }
 
-      // 主动冒泡时也可能想起点旧事（同样走闸门，结果作 system 记忆提示）
-      let memoryMsg: ChatMessage | null = null
-      if (config.rag.toolsEnabled && (needsRecall(lastMsg) || Math.random() < config.rag.recallProb)) {
-        const note = await searchMemoryNote(key, lastMsg)
-        memoryMsg = buildMemoryHintMessage(note)
-      }
-
-      const stateMsg = buildStateContextMessage(this.recentState)
+      const toolReplies: string[] = []
+      const executors = createAgentExecutors(key, {
+        reply: async (text) => { toolReplies.push(text) },
+        getState: () => buildStatePrompt(this.recentState),
+      })
+      const llmTools: ToolSpec[] = [
+        ...MEMORY_TOOLS,
+        REPLY_TOOL,
+        ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
+      ]
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(styleMsg ? [styleMsg] : []),
         ...(arMsg ? [arMsg] : []),
-        ...(memoryMsg ? [memoryMsg] : []),
-        ...(stateMsg ? [stateMsg] : []),
         userMsg,
       ]
-      const raw = config.rag.toolsEnabled
-        ? (await callLlmWithTools(messages, {
-            tools: MEMORY_TOOLS,
-            executors: createMemoryExecutors(key),
-            maxIter: config.rag.toolMaxIter,
-          })).text
-        : await callLlm(messages)
-      if (!raw) return
+      let raw = ''
+      if (config.rag.toolsEnabled) {
+        const r = await callLlmWithTools(messages, {
+          tools: llmTools,
+          executors,
+          maxIter: config.agent.toolMaxIter,
+        })
+        raw = toolReplies.length ? toolReplies.join('\n') : r.text
+      } else {
+        raw = await callLlm(messages)
+      }
+      if (!raw) {
+        if (Math.random() < config.agent.silentReplyProb) raw = await callLlm(messages)
+        if (!raw) return
+      }
       let reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))
       const pf = config.humanlike.profanity
       if (pf.hardBlock) {

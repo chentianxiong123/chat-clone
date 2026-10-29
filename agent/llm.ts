@@ -254,7 +254,8 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
       break
     }
   }
-  return { text: '', providerId: chain[0]?.id ?? '', toolCalls: 0, tokensIn, tokensOut, cost }
+  // 循环结束仍无 content：保留已执行工具计数（模型可能只调了工具就停，如 reply 攒句）
+  return { text: '', providerId: chain[0]?.id ?? '', toolCalls, tokensIn, tokensOut, cost }
 }
 
 /** 直接调用（WebUI 手测 LLM 用），返回完整响应或错误信息 */

@@ -120,10 +120,11 @@ export const config = {
     // 群里被这样的词叫时会被唤醒（逗号分隔，命中即视为 @✓）
     wakeWords: (process.env.PERSONA_WAKE_WORDS || '崽种,qq,机器人').split(',').map(s => s.trim()).filter(Boolean),
     // 系统提示模板({name} / {friend} / {rag} 会被替换)
-    systemPromptTemplate: envJson('PERSONA_SYSTEM_PROMPT', `你是{name}，在群里跟朋友聊天。
-
-回复时尽量模仿下面你本人过往的真实聊天记录：语气、长度、用词、分条习惯都照着来，不要像助手，不要解释自己在模仿。
-
+    // 身份认同版：不写"扮演/模仿"，只确立"你就是{name}本人"+行为边界；
+    // 真实说话方式由模型按需调 search_past_memory 获取，不由描述定义。
+    systemPromptTemplate: envJson('PERSONA_SYSTEM_PROMPT', `你是{name}，一个在QQ里跟朋友聊天的真人。
+你不是助手、不是客服、不是解说员；你不解释自己、不总结、不输出条理分明的答案。
+群里有人说话你可能接、也可能不理，像真人一样挑着回，不用每句都答。
 {rag}`),
     // Few-shot 示例对话 (可选,每行格式 "user: xxx\nassistant: xxx")
     demoDialogs: envJson('PERSONA_DEMO_DIALOGS', ''),
@@ -160,6 +161,13 @@ export const config = {
     memoryKeepRecentRatio: Number(process.env.MEMORY_KEEP_RECENT_RATIO) || 0.15,
     // 每次压缩的摘要合并进长期记忆（AstrBot 注入 user 历史摘要对）
     memorySummaryMerging: process.env.MEMORY_SUMMARY_MERGING !== 'false',
+    // ── 工具化 agent（MCP 式：模型按需调工具，回复也走 reply 工具）──
+    // 工具循环上限（模型一轮最多调几次工具；防小模型死循环）
+    toolMaxIter: Math.max(1, Math.round(envNum('AGENT_TOOL_MAX_ITER', 4))),
+    // 模型没调 reply 且没输出内容时，按此概率补生成一句兜底；否则沉默（真人挑话接）
+    silentReplyProb: clamp01(envNum('AGENT_SILENT_REPLY_PROB', 0.35)),
+    // get_state 工具开关：模型可主动查自己状态（纯数据，无指令）
+    getStateEnabled: process.env.AGENT_GET_STATE !== 'false',
   },
   // ── 拟人画像 HumanProfile（A~E 全维度，全部可配置）────────────────────────
   // 目标：每个参数都能从「原始聊天数据」统计得出（见 profile.ts buildProfileFromStats）

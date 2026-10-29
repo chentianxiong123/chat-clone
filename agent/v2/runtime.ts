@@ -1,13 +1,11 @@
 import { config } from '../config.js'
 import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm.js'
-import { buildSystemPrompt, buildStyleHintMessage, buildMemoryHintMessage } from '../prompt.js'
-import { searchRag } from '../rag.js'
-import { needsRecall, searchMemoryNote } from '../tools.js'
+import { buildSystemPrompt } from '../prompt.js'
 import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from '../antirepeat.js'
 import { limitProfanity } from '../profanity.js'
 import { applyStyle, sampleReactMs, splitLongSegment, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
-import { computeModifiers, loadState, type StateModifiers } from '../state.js'
+import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
 import { createToolRegistry, type SendMessageFn } from './tools.js'
 import { addToolTrace, appendEvent, createRun, finishRun } from './store.js'
 import {
@@ -131,29 +129,20 @@ export class AgentRuntime {
         await sleep(Math.max(1000, Math.round(sampleReactMs() * (mods?.reactDelay ?? 1))))
       }
 
-      const stylePromise = searchRag(ctx)
-      let styleMsg: ChatMessage | null = null
-      try { styleMsg = buildStyleHintMessage(await stylePromise) } catch (e) {
-        console.warn('[V2] RAG 人设检索失败:', (e as Error).message)
-      }
-
-      let memoryMsg: ChatMessage | null = null
-      if (config.rag.toolsEnabled && (needsRecall(ctx) || Math.random() < config.rag.recallProb)) {
-        const note = await searchMemoryNote(key, ctx)
-        memoryMsg = buildMemoryHintMessage(note)
-      }
-
       const messages: ChatMessage[] = [
         { role: 'system', content: buildSystemPrompt(thread.kind) },
         ...hist,
-        ...(styleMsg ? [styleMsg] : []),
         ...(arMsg ? [arMsg] : []),
-        ...(memoryMsg ? [memoryMsg] : []),
         ...(scopeMsg ? [scopeMsg] : []),
         userMsg,
       ]
 
-      const tools = createToolRegistry(thread, this.send)
+      const tools = createToolRegistry(
+        thread,
+        thread.channel === 'qq' && config.agent.getStateEnabled
+          ? () => buildStatePrompt(loadState())
+          : undefined,
+      )
       const onToolStart = (info: { name: string; args: Record<string, unknown>; startedAt: number }): void => {
         const callId = `${runId}:${info.name}:${info.startedAt}`
         this.emit({
@@ -192,9 +181,14 @@ export class AgentRuntime {
       tokensIn = llm.tokensIn ?? 0
       tokensOut = llm.tokensOut ?? 0
       cost = llm.cost ?? 0
-      const raw = llm.text
+      let raw = llm.text
+      // 模型沉默（没调 reply 也没输出）→ 概率兜底补一句，否则真沉默
+      if (!raw && !tools.context.sentByTool && Math.random() < config.agent.silentReplyProb) {
+        const fb = await callLlmWithProviders(messages)
+        raw = fb.text
+      }
       if (!raw && !tools.context.sentByTool) {
-        console.log(`[V2] ${key} LLM 无回复，跳过`)
+        console.log(`[V2] ${key} 沉默（未调 reply）`)
         status = 'skipped'
         return rec
       }
@@ -223,9 +217,7 @@ export class AgentRuntime {
         return rec
       }
 
-      const segments = tools.context.sentByTool
-        ? tools.context.sentTexts
-        : await this.sendSegments(thread, finalReply, runId)
+      const segments = await this.sendSegments(thread, finalReply, runId)
 
       this.emit({
         type: 'assistant.message', thread: key, runId,

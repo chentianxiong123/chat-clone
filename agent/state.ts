@@ -352,51 +352,40 @@ function fmtDuration(ms: number): string {
   return `${Math.round(h / 24)}天`
 }
 
-/** 紧凑状态行（注入提示词用，控制在 promptMaxChars 内） */
+/**
+ * 纯数据状态视图（供 get_state 工具按需查询）。
+ * 只报当前状态的客观数值，不带任何"累就短/烦就敷衍"这类倾向指令——
+ * 模型自己判断怎么说话，避免被状态牵着走（用户明确否定了指令式状态注入）。
+ */
 export function buildStatePrompt(state: RecentState, now = Date.now()): string {
   const rs = config.humanlike.recentState
-  if (!rs.enabled || !rs.injectPrompt) return ''
+  if (!rs.enabled) return ''
   const labels = stateLabels(state)
   const windowMin = Math.max(1, Math.round(rs.windowMs / 60_000))
   const msgRate = state.recentMsgs / windowMin
   const silence = state.lastSelfAt ? fmtDuration(now - state.lastSelfAt) : '很久'
-  const topic = state.topic ? `；话题：${state.topic}×${Math.round(state.topicHits)}` : ''
-  const hints: string[] = []
-  if (state.energy < 0.4) hints.push('累就短、懒得展开')
-  if (state.irritation > 0.4) hints.push('烦就敷衍、别解释')
-  if (state.busy > 0.55) hints.push('忙就一两句')
-  if (state.social < 0.35) hints.push('不想聊就嗯哦')
-  if (state.mood > 0.7) hints.push('心情好可以多聊两句')
-  if (state.interest > 0.7) hints.push('这个话题有兴趣就接')
-  // 动态表现：追问 / 岔开（按当前状态概率性给倾向，增加"活人感"）
-  const followUpP = 0.25 + 0.45 * state.interest + 0.2 * (state.mood - 0.55) - 0.15 * state.irritation
-  const deflectP = 0.6 - 0.45 * state.interest + 0.2 * state.irritation - 0.15 * (state.mood - 0.55)
-  if (followUpP > 0.6) hints.push('有点感兴趣，可顺嘴追问对方一句')
-  if (deflectP > 0.55) hints.push('这个话题没啥兴趣，可敷衍或岔开')
-  if (!hints.length) hints.push('正常聊')
+  const topic = state.topic ? `话题：${state.topic}（重复${Math.round(state.topicHits)}次）` : '话题不固定'
   const text =
-    `【你此刻的状态】精力${Math.round(state.energy * 100)}%（${labels.energy}） ` +
-    `心情${Math.round(state.mood * 100)}%（${labels.mood}） ` +
-    `耐心${Math.round(state.patience * 100)}%（${labels.patience}） ` +
-    `社交电量${Math.round(state.social * 100)}% ` +
-    `忙碌${Math.round(state.busy * 100)}%（${labels.busy}） ` +
-    `烦躁${Math.round(state.irritation * 100)}% ` +
-    `兴趣${Math.round(state.interest * 100)}%\n` +
-    `近期消息${state.recentMsgs.toFixed(1)}条、回复${state.recentReplies.toFixed(1)}条（约${msgRate.toFixed(1)}条/分）；` +
-    `距上次说话${silence}；连续对方${state.otherStreak}条/自己${state.selfStreak}条${topic}\n` +
-    `按这个状态自然说话：${hints.join('；')}。不要直接报数值。`
+    `（状态）精力${Math.round(state.energy * 100)}%（${labels.energy}）` +
+    `、心情${Math.round(state.mood * 100)}%（${labels.mood}）` +
+    `、耐心${Math.round(state.patience * 100)}%（${labels.patience}）` +
+    `、社交电量${Math.round(state.social * 100)}%` +
+    `、忙碌${Math.round(state.busy * 100)}%（${labels.busy}）` +
+    `、烦躁${Math.round(state.irritation * 100)}%` +
+    `、兴趣${Math.round(state.interest * 100)}%；` +
+    `近期约${msgRate.toFixed(1)}条/分；距上次说话${silence}；` +
+    `连续对方${state.otherStreak}条/自己${state.selfStreak}条；${topic}`
   return text.slice(0, rs.promptMaxChars)
 }
 
-/** 状态消息放在对话尾部（RAG 之后、当前用户消息之前），不破坏 system 前缀缓存 */
+/**
+ * 状态上下文消息（保留导出兼容；不再由 core/v2 预注入——
+ * 状态改为 get_state 工具按需查询，避免模型围着状态指令走）。
+ */
 export function buildStateContextMessage(state: RecentState, now = Date.now()): ChatMessage | null {
   const text = buildStatePrompt(state, now)
   if (!text) return null
-  return {
-    role: 'user',
-    content: `（系统给你此刻的状态，不要复述，只影响语气和长度）\n${text}`,
-    time: now,
-  }
+  return { role: 'user', content: text, time: now }
 }
 
 export function stateView(state: RecentState, now = Date.now()): RecentStateView {

@@ -105,3 +105,68 @@ export function createMemoryExecutors(sceneKey: string): Record<string, ToolExec
     },
   }
 }
+
+/**
+ * reply 工具：模型主动开口说一句（可多次，一次一句，天然短句分条）。
+ * 不调用 = 选择沉默（真人挑话接）。
+ */
+export const REPLY_TOOL: ToolSpec = {
+  type: 'function',
+  function: {
+    name: 'reply',
+    description:
+      '开口说一句话。回复必须走这个工具：想说话就调用它，一次一句短句；' +
+      '可以连续调用多次，分几条说。不想接这轮话题就什么都不调用、直接结束（沉默）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要说的一句话（短句，像真人打字，别带序号/引号）' },
+      },
+      required: ['text'],
+    },
+  },
+}
+
+/**
+ * get_state 工具：模型按需查看自己当前状态（精力/心情/消息密度/话题等）。
+ * 纯数据、无倾向指令——只有模型真在意状态时才查，避免每轮被状态牵着走。
+ */
+export const GET_STATE_TOOL: ToolSpec = {
+  type: 'function',
+  function: {
+    name: 'get_state',
+    description:
+      '查看自己此刻的状态（精力/心情/忙碌/消息密度/距离上次说话/当前话题）。' +
+      '想确认自己"现在什么状态、该不该短句或敷衍"时调用；一般闲聊不用。',
+    parameters: { type: 'object', properties: {} },
+  },
+}
+
+/** 工具执行器回调：reply 说一句（由 core/v2 攒句+发送），getState 返回纯数据状态 */
+export interface AgentToolHooks {
+  reply: (text: string) => Promise<void>
+  getState: () => Promise<string> | string
+}
+
+/**
+ * 统一 agent 工具集执行器：记忆 + reply + get_state。
+ * 供 core（真实 QQ）与 v2（模拟）共用，只差 reply/getState 的具体实现。
+ */
+export function createAgentExecutors(
+  sceneKey: string,
+  hooks: AgentToolHooks,
+): Record<string, ToolExecutor> {
+  return {
+    ...createMemoryExecutors(sceneKey),
+    reply: async (args: Record<string, unknown>) => {
+      const text = String(args?.text ?? '').trim()
+      if (!text) return '（没说：内容为空）'
+      await hooks.reply(text)
+      return '（已说）'
+    },
+    get_state: async () => {
+      const s = await hooks.getState()
+      return s || '（状态未知）'
+    },
+  }
+}
