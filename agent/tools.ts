@@ -10,15 +10,6 @@ export function needsRecall(text: string): boolean {
   return RECALL_RE.test(text)
 }
 
-/** 把 RAG 结果压成一句极短的"印象"（≤60 字），防止淹没主上下文 */
-function compactNote(raw: string): string {
-  if (!raw) return ''
-  const first = raw.split('\n--\n').map(s => s.trim()).filter(Boolean)[0] || ''
-  const s = first.replace(/\s+/g, ' ').trim()
-  const max = config.rag.factMaxChars
-  return s.length > max ? s.slice(0, max) + '…' : s
-}
-
 const STOP_BIGRAMS = new Set([
   '什么', '怎么', '为什', '这个', '那个', '一个', '没有', '还是', '不是', '可以',
   '我们', '你们', '他们', '现在', '真的', '是不', '有没', '东西', '事情', '问题',
@@ -41,16 +32,20 @@ function relevant(query: string, note: string): boolean {
 }
 
 /**
- * 取一条记忆：优先查已记住的事实（remember 写入），没有再查历史语料。
- * 返回空串表示没想起来（含相关性不足的情况，宁可不想起也不乱入）。
+ * 取一段记忆：优先查已记住的事实（remember 写入），没有再查历史语料。
+ * 返回完整对话对（对方说→你接），模型看真实语境模仿；空串=没想起来。
  */
 export async function searchMemoryNote(sceneKey: string, query: string): Promise<string> {
   const facts = searchFacts(sceneKey, query, config.rag.toolMaxItems)
   if (facts.length) return facts[0].slice(0, config.rag.factMaxChars)
   const raw = await searchRag(query)
-  const note = compactNote(raw)
-  if (!note || !relevant(query, note)) return ''
-  return note
+  if (!raw || !relevant(query, raw)) return ''
+  // 对话对：user=对方、assistant=你（本人）。转成"对方/你"标签，模型看真实接话语境。
+  return raw.split('\n').map(l => {
+    if (l.startsWith('assistant:')) return `你：${l.replace(/^assistant:\s*/, '').trim()}`
+    if (l.startsWith('user:')) return `对方：${l.replace(/^user:\s*/, '').trim()}`
+    return l
+  }).join('\n')
 }
 
 export const MEMORY_TOOLS: ToolSpec[] = [
@@ -95,7 +90,8 @@ export function createMemoryExecutors(sceneKey: string): Record<string, ToolExec
       const q = String(args?.query ?? '').trim()
       if (!q) return '（没想起来）'
       const note = await searchMemoryNote(sceneKey, q)
-      return note ? `（你隐约记得：${note}）` : '（没想起来）'
+      // 直接返回真实对话对（对方说→你接），模型看语境；不再包"你隐约记得"（那是人机痕迹）
+      return note || '（没想起来）'
     },
     remember: async (args: Record<string, unknown>) => {
       const fact = String(args?.fact ?? '').trim()

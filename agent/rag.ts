@@ -176,24 +176,24 @@ export async function searchRag(query: string): Promise<string> {
     if (picked.length) break
   }
   if (!picked.length) return ''
-  // 关键：只取"本人"发言（assistant 行），剔除对方(user)的发言，
-  // 避免把大肥鱼/朋友的话当"本人原话"注入，导致人格混淆与复读。
-  // 每 chunk 限本人 2 条、全库最多 6 条、总长 ≤ 500 字，防止 RAG 淹没主上下文。
+  // 返回完整对话对（user=对方 + assistant=本人）：AI 看到"对方说→本人怎么接"的语境，
+  // 才能模仿接话节奏/语气/长度，而不是只拿一句干巴巴本人原话。
+  // 限 2~3 对（6 行）、总长 ≤ 600 字，防止 RAG 淹没主上下文。
   const MAX_CHUNKS = 4
-  const MAX_PER_CHUNK = 2
-  const MAX_TOTAL_CHARS = 500
-  const own = (text: string): string[] => text
+  const MAX_PER_CHUNK = 6
+  const MAX_TOTAL_CHARS = 600
+  const pairs = (text: string): string[] => text
     .split('\n')
-    .filter(l => l.startsWith('assistant:'))
-    .map(l => l.replace(/^assistant:\s*/, '').trim())
+    .filter(l => /^(user|assistant):/.test(l))
+    .map(l => l.trim())
     .filter(Boolean)
     .slice(0, MAX_PER_CHUNK)
   let total = 0
   const lines: string[] = []
   for (const r of picked.slice(0, MAX_CHUNKS)) {
-    const ownLines = own(r.text)
-    if (!ownLines.length) continue
-    for (const line of ownLines) {
+    const pairLines = pairs(r.text)
+    if (!pairLines.length) continue
+    for (const line of pairLines) {
       if (total + line.length > MAX_TOTAL_CHARS) break
       lines.push(line)
       total += line.length
@@ -201,7 +201,7 @@ export async function searchRag(query: string): Promise<string> {
     if (total >= MAX_TOTAL_CHARS) break
   }
   if (!lines.length) return ''
-  return lines.join('\n--\n')
+  return lines.join('\n')
 }
 
 export async function ragSearch(query: string): Promise<RagResult> {
