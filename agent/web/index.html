@@ -413,9 +413,20 @@
         <div id="svc-note" class="mt-3 text-xs text-emerald-400"></div>
       </div>
 
+      <div class="glass round-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold">对话机制配置
+            <span class="text-[10px] text-slate-500 font-normal ml-2">攒批 / 回复 / 冷却 / RAG / 记忆压缩 · 保存写回 .env，重启 agent 生效</span>
+          </div>
+          <button id="mech-save" class="btn btn-sm btn-primary">保存</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 text-xs" id="mech-form"></div>
+        <div id="mech-note" class="mt-3 text-xs text-emerald-400"></div>
+      </div>
+
       <div class="glass round-2xl p-5">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">当前生效配置 <span class="text-[10px] text-slate-500 font-normal ml-2">只读 · RAG/人格/模型配置在各自主页</span></div>
+          <div class="text-sm font-semibold">当前生效配置 <span class="text-[10px] text-slate-500 font-normal ml-2">全部机制 · 只读 · 可编辑在各自主页</span></div>
           <button id="cfg-reload" class="btn btn-sm btn-ghost">刷新</button>
         </div>
         <div id="active-config" class="mt-2"></div>

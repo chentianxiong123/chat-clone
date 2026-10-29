@@ -535,6 +535,26 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         })
       }
 
+      // ── 对话机制配置（攒批/回复/冷却/RAG/记忆压缩，逐项 patch 写回 .env）──
+      if (path === '/api/mechanism/config' && req.method === 'POST') {
+        const body = await readBody(req)
+        const keys = ['BATCH_N_MIN','BATCH_N_MAX','BATCH_T','PRIVATE_BATCH_N','PRIVATE_BATCH_T',
+          'GROUP_REPLY_PROB','PRIVATE_REPLY_PROB','REPLY_COOLDOWN','PRIVATE_REPLY_COOLDOWN',
+          'RAG_VEC_PROB','RAG_TOP_K','RAG_VEC_MIN_SCORE','RAG_RECALL_PROB','RAG_TOOL_MAX_ITER','RAG_TOOL_MAX_ITEMS',
+          'MEMORY_MAX_TOKENS','MEMORY_COMPRESS_THRESHOLD','MEMORY_KEEP_RECENT_RATIO','RAG_RECALL_MODE']
+        const patch: Record<string, string> = {}
+        for (const k of keys) {
+          if (body[k] == null || body[k] === '') continue
+          const raw = String(body[k]).trim()
+          if (/^\d+(\.\d+)?$/.test(raw)) patch[k] = String(Math.max(0, Number(raw)))
+          else if (['auto','all','random','agent'].includes(raw)) patch[k] = raw
+        }
+        if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: '无有效字段' })
+        const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+        writeEnvWithBackup(applyEnvPatch(raw, patch))
+        return json(res, 200, { ok: true, note: `已写回 .env：${Object.keys(patch).join('、')}（重启 agent 生效）` })
+      }
+
       // ── 写回 .env（需重启生效）──
       if (path === '/api/config' && req.method === 'POST') {
         const body = await readBody(req)

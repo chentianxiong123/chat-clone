@@ -761,7 +761,42 @@ function renderActiveConfig(cfg, rag, profileMeta) {
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">记忆 / 触发</div>
         <div class="font-mono">MAX_HISTORY=${cfg.agent.maxHistory}</div>
-        <div class="text-slate-600">MODE=${cfg.agent.respondMode}</div>
+        <div class="text-slate-600">MODE=${cfg.agent.respondMode} · 私攒N=${cfg.agent.privateBatchN} T=${(cfg.agent.privateBatchT/1000).toFixed(0)}s</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">回复控制</div>
+        <div class="font-mono">群${pct(hl.replyProb.group)} 私${pct(hl.replyProb.private)}</div>
+        <div class="text-slate-600">动态 ${pct(hl.replyProb.dynamic?.base)}±${pct(hl.replyProb.dynamic?.boost)} 连发≥${bp.threshold}×${bp.factor} · 近期状态${st.enabled ? '开' : '关'}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">RAG 召回</div>
+        <div class="font-mono">${esc(cfg.rag.recallMode || 'auto')} · ${pct(cfg.rag.vecProb)}向量 · 阈值${cfg.rag.vecMinScore ?? 0.10}</div>
+        <div class="text-slate-600">topK=${cfg.rag.topK} ${cfg.rag.embedEnabled ? 'embed开' : 'embed关'} ${(rag?.enabledModes||[]).join('/')}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">RAG 工具</div>
+        <div class="font-mono">按需${cfg.rag.toolsEnabled ? '开' : '关'} · 回忆概率${pct(cfg.rag.recallProb)}</div>
+        <div class="text-slate-600">循环≤${cfg.rag.toolMaxIter} · 每次${cfg.rag.toolMaxItems}条 · 单条≤${cfg.rag.factMaxChars}字</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">记忆压缩</div>
+        <div class="font-mono">MAX${cfg.agent.memoryMaxTokens}t 阈${Math.round((cfg.agent.memoryCompressThreshold||0)*100)}%</div>
+        <div class="text-slate-600">保近${Math.round((cfg.agent.memoryKeepRecentRatio||0)*100)}% 摘要合并${cfg.agent.memorySummaryMerging ? '开' : '关'} 持久${cfg.agent.memoryPersist ? '开' : '关'}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 防重复/忽略短</div>
+        <div class="font-mono">重复窗${hl.antiRepeat?.window}≥${hl.antiRepeat?.minCount}×${hl.antiRepeat?.ratio}</div>
+        <div class="text-slate-600">忽略短${hl.ignoreShort?.minChars}字×${pct(hl.ignoreShort?.prob)} 相似跳过${hl.antiRepeat?.dropSim}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">拟人 · 刷屏/脏话</div>
+        <div class="font-mono">刷屏${hl.burst?.maxReplies}次/${(hl.burst?.windowMs/1000).toFixed(0)}s +${(hl.burst?.extraCooldownMs/1000).toFixed(0)}s</div>
+        <div class="text-slate-600">脏话硬拦${hl.profanity?.hardBlock ? '开' : '关'}${hl.profanity?.replace ? ' → ' + esc(hl.profanity.replace) : ''}</div>
+      </div>
+      <div class="glass p-3 round-xl">
+        <div class="text-slate-500 uppercase mb-1">工具化 agent</div>
+        <div class="font-mono">工具循环≤${cfg.agent.toolMaxIter}</div>
+        <div class="text-slate-600">get_state ${cfg.agent.getStateEnabled ? '开' : '关'} · reply/search_past_memory/remember</div>
       </div>
       <div class="glass p-3 round-xl">
         <div class="text-slate-500 uppercase mb-1">Persona</div>
@@ -771,6 +806,69 @@ function renderActiveConfig(cfg, rag, profileMeta) {
     </div>`
 }
 $('cfg-reload').addEventListener('click', () => { loadConfig(); loadServiceConfig() })
+
+// ── 对话机制配置表单（逐项可编辑，写回 .env）──
+const MECH_FIELDS = [
+  ['BATCH_N_MIN', '群攒批 N 最小', 'number', 1],
+  ['BATCH_N_MAX', '群攒批 N 最大', 'number', 1],
+  ['BATCH_T', '群攒批窗口(ms)', 'number', 1000],
+  ['PRIVATE_BATCH_N', '私聊攒批 N', 'number', 1],
+  ['PRIVATE_BATCH_T', '私聊攒批窗口(ms)', 'number', 1000],
+  ['GROUP_REPLY_PROB', '群回复概率', 'range', 0.01],
+  ['PRIVATE_REPLY_PROB', '私聊回复概率', 'range', 0.01],
+  ['REPLY_COOLDOWN', '群冷却(ms)', 'number', 1000],
+  ['PRIVATE_REPLY_COOLDOWN', '私聊冷却(ms)', 'number', 1000],
+  ['RAG_VEC_PROB', '向量升级概率', 'range', 0.01],
+  ['RAG_TOP_K', '每路 topK', 'number', 1],
+  ['RAG_VEC_MIN_SCORE', '向量质量阈值', 'range', 0.01],
+  ['RAG_RECALL_PROB', '主动回忆概率', 'range', 0.01],
+  ['RAG_TOOL_MAX_ITER', '工具循环上限', 'number', 1],
+  ['RAG_TOOL_MAX_ITEMS', '每次注入条数', 'number', 1],
+  ['MEMORY_MAX_TOKENS', '记忆上限(token)', 'number', 1024],
+  ['MEMORY_COMPRESS_THRESHOLD', '压缩阈值', 'range', 0.01],
+  ['MEMORY_KEEP_RECENT_RATIO', '保留近段比', 'range', 0.01],
+  ['RAG_RECALL_MODE', '召回方式', 'select', ['auto', 'all', 'random', 'agent']],
+]
+function renderMechForm(cfg) {
+  const el = $('mech-form')
+  if (!el) return
+  const env = (cfg.env || '')
+  const get = (k) => { const m = env.match(new RegExp('^' + k + '=(.*)$', 'm')); return m ? m[1].trim() : '' }
+  el.innerHTML = MECH_FIELDS.map(([k, label, type, opt]) => {
+    const v = get(k)
+    if (type === 'select') {
+      const opts = opt.map(o => `<option value="${o}" ${v === o ? 'selected' : ''}>${o}</option>`).join('')
+      return `<label class="block"><span class="text-slate-500">${label} <span class="text-slate-600">${k}</span></span><select id="mech-${k}" class="select select-sm select-bordered w-full mt-1">${opts}</select></label>`
+    }
+    if (type === 'range') {
+      const pctv = v ? Math.round(parseFloat(v) * 100) : ''
+      return `<label class="block"><span class="text-slate-500">${label} <span class="text-slate-600">${k}</span></span>
+        <div class="flex items-center gap-2 mt-1"><input type="range" id="mech-${k}" class="flex-1 accent-indigo-500" min="0" max="100" step="1" value="${pctv || 0}"><span class="font-mono text-xs w-10 text-right">${pctv || 0}%</span></div></label>`
+    }
+    return `<label class="block"><span class="text-slate-500">${label} <span class="text-slate-600">${k}</span></span><input id="mech-${k}" type="number" step="${opt}" class="input input-sm input-bordered w-full mt-1" value="${v}"></label>`
+  }).join('')
+  el.querySelectorAll('input[type=range]').forEach(r => r.addEventListener('input', () => {
+    r.parentElement.querySelector('span').textContent = r.value + '%'
+  }))
+}
+async function saveMechConfig() {
+  const body = {}
+  for (const [k, type, , opt] of MECH_FIELDS) {
+    const inp = $('mech-' + k)
+    if (!inp) continue
+    if (type === 'range') body[k] = String(Number(inp.value) / 100)
+    else if (type === 'select') body[k] = inp.value
+    else body[k] = inp.value
+  }
+  const r = await fetch('/api/mechanism/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const res = await r.json()
+  const note = $('mech-note')
+  note.textContent = res.ok ? '✓ ' + res.note : '❌ ' + (res.error || '保存失败')
+  note.className = 'mt-3 text-xs ' + (res.ok ? 'text-emerald-400' : 'text-red-400')
+}
+$('mech-save')?.addEventListener('click', () => { void saveMechConfig() })
 $('cfg-apply-preset')?.addEventListener('click', () => {
   const name = $('cfg-preset').value
   if (!name) return
