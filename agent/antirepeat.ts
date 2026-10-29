@@ -1,68 +1,7 @@
-import type { config } from './config.js'
-
-type AntiRepeatCfg = typeof config.humanlike.antiRepeat
-
-/** 常见虚词二元组，避免把"什么/这个"当高频词 */
-const STOP = new Set([
-  '什么', '怎么', '为什', '这个', '那个', '一个', '没有', '还是', '不是', '可以',
-  '我们', '你们', '他们', '现在', '真的', '是不', '有没', '东西', '事情', '问题',
-  '时候', '今天', '明天', '昨天', '晚上', '白天', '自己', '知道', '觉得', '感觉',
-  '应该', '可能', '然后', '所以', '但是', '因为', '如果', '就是', '这么', '那么',
-  '这样', '那样', '一样', '一点', '有点', '已经', '还有', '也是', '都是', '只是',
-  '不能', '不会', '不要', '不用', '不过', '而且', '或者', '虽然', '于是', '其实',
-])
-
-/** 统计最近回复里的过热词（2~3 字中文 n-gram + 英文词），按"出现在多少条回复"计频 */
-export function hotWords(replies: string[], cfg: AntiRepeatCfg): string[] {
-  const n = replies.length
-  if (n < cfg.minCount) return []
-  const freq = new Map<string, number>()
-  for (const r of replies) {
-    const text = r.replace(/[^\u4e00-\u9fffa-zA-Z0-9]/g, '')
-    const seen = new Set<string>()
-    for (let len = 2; len <= 3; len++) {
-      for (let i = 0; i + len <= text.length; i++) {
-        const g = text.slice(i, i + len)
-        if (!/^[\u4e00-\u9fff]{2,3}$/.test(g)) continue
-        if (STOP.has(g) || seen.has(g)) continue
-        seen.add(g)
-        freq.set(g, (freq.get(g) || 0) + 1)
-      }
-    }
-    for (const w of (r.match(/[a-zA-Z]{3,}/g) || [])) {
-      const lw = w.toLowerCase()
-      if (seen.has(lw)) continue
-      seen.add(lw)
-      freq.set(lw, (freq.get(lw) || 0) + 1)
-    }
-  }
-  const cand: Array<[string, number]> = []
-  for (const [g, c] of freq) {
-    if (c >= cfg.minCount && c / n >= cfg.ratio) cand.push([g, c])
-  }
-  // 频次高的优先；保留最短的根词（"剑魔"优先于"剑魔肉"）
-  cand.sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)
-  const kept: string[] = []
-  for (const [g] of cand) {
-    if (kept.some(k => g.includes(k))) continue
-    kept.push(g)
-  }
-  return kept.slice(0, cfg.maxHint)
-}
-
-/** 生成"别重复自己"的动态提示（过热词 + 近期原话样例）；无过热词返回空串 */
-export function buildAntiRepeatHint(hot: string[], recent: string[]): string {
-  if (!hot.length) return ''
-  const parts = ['【别重复自己】', `你最近总说这些词：${hot.join('、')}。这轮换个说法，别老提它们。`]
-  const samples = recent.slice(-4)
-    .map(r => r.replace(/\s+/g, ' ').trim().slice(0, 36))
-    .filter(Boolean)
-  if (samples.length) {
-    parts.push('你最近说过（别照抄/别重复）：\n' + samples.map(s => '- ' + s).join('\n'))
-  }
-  return parts.join('\n')
-}
-
+/**
+ * 防复读：只在外部系统（代码层）判定"新回复与近期过于相似"时跳过，绝不注入 LLM——
+ * "别重复/别照抄/别老提这些词"这类提示是诱导，会让模型过度执行，已废弃。
+ */
 function norm(s: string): string {
   return s.replace(/[\s\p{P}\p{S}]/gu, '')
 }

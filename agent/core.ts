@@ -2,7 +2,7 @@ import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
 import { buildSystemPrompt } from './prompt.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
-import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from './antirepeat.js'
+import { tooSimilar, pushRecent } from './antirepeat.js'
 import { relevanceScore } from './dynamics.js'
 import { limitProfanity } from './profanity.js'
 import { applyStyle, sampleReactMs, splitLongSegment, stateReplyProb, type StyleBias } from './profile.js'
@@ -413,14 +413,9 @@ export class AgentCore {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
 
-      // 反模板：最近自己回复里的过热词提醒（动态提示，放在历史之后，不破坏长前缀缓存）
       const ar = config.humanlike.antiRepeat
       const recent = this.recentReplies.get(key) ?? []
-      const hot = ar.enabled ? hotWords(recent, ar) : []
-      const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
-      const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
-      if (arHint) console.log(`[Core] ${key} 反模板提示: ${hot.join('、')}`)
-      // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁
+      // 只回触发者：整段上下文都给人名标签作背景，但要说明本轮回谁（场景事实，非风格诱导）
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
         : '\n'
@@ -444,7 +439,6 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(arMsg ? [arMsg] : []),
         userMsg,
       ]
 
@@ -459,11 +453,12 @@ export class AgentCore {
       } else {
         raw = await callLlm(messages)
       }
-      // 模型沉默（没调 reply 也没输出）→ 概率兜底补一句，否则真沉默
+      // 模型没调 reply 也没输出内容 → 强制再生成一句。
+      // 回不回由外部系统（effectiveReplyProb）决定；走到这一步就是"决定回"，模型必产出，不再沉默。
       if (!raw) {
-        if (Math.random() < config.agent.silentReplyProb) raw = await callLlm(messages)
+        raw = await callLlm(messages)
         if (!raw) {
-          console.log(`[Core] ${key} 沉默（未调 reply）`)
+          console.log(`[Core] ${key} 无输出（模型未生成）`)
           this.emit()
           return
         }
@@ -557,9 +552,6 @@ export class AgentCore {
       const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
       const ar = config.humanlike.antiRepeat
       const recent = this.recentReplies.get(key) ?? []
-      const hot = ar.enabled ? hotWords(recent, ar) : []
-      const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
-      const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
@@ -577,7 +569,6 @@ export class AgentCore {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(arMsg ? [arMsg] : []),
         userMsg,
       ]
       let raw = ''
@@ -592,7 +583,7 @@ export class AgentCore {
         raw = await callLlm(messages)
       }
       if (!raw) {
-        if (Math.random() < config.agent.silentReplyProb) raw = await callLlm(messages)
+        raw = await callLlm(messages)
         if (!raw) return
       }
       let reply = stripSelfPrefix(applyStyle(raw, lastMsg, this.styleBias(mods)))

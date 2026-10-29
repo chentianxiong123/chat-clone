@@ -5,7 +5,7 @@ import { AgentCore } from './core.js'
 import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'
 import { ragImportInfo, ragSearch, ragStatus, searchRag } from './rag.js'
-import { buildSystemPrompt, buildStyleHintMessage } from './prompt.js'
+import { buildSystemPrompt } from './prompt.js'
 import { callLlmRaw } from './llm.js'
 import { getUsageSummary } from './stats.js'
 import { getActiveProvider, listProviders, listEmbedProviders } from './domain/models/index.js'
@@ -436,11 +436,9 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         const prompt = body.prompt || ''
         const withRag = body.withRag !== false
         const ragCtx = withRag ? await searchRag(prompt) : ''
-        const styleMsg = buildStyleHintMessage(ragCtx)
         const messages = [
           { role: 'system' as const, content: buildSystemPrompt('group') },
-          ...(styleMsg ? [styleMsg] : []),
-          { role: 'user' as const, content: prompt },
+          { role: 'user' as const, content: ragCtx ? `${ragCtx}\n\n${prompt}` : prompt },
         ]
         const result = await callLlmRaw(messages)
         return json(res, 200, result)

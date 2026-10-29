@@ -1,7 +1,7 @@
 import { config } from '../config.js'
 import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm.js'
 import { buildSystemPrompt } from '../prompt.js'
-import { hotWords, buildAntiRepeatHint, tooSimilar, pushRecent } from '../antirepeat.js'
+import { tooSimilar, pushRecent } from '../antirepeat.js'
 import { limitProfanity } from '../profanity.js'
 import { applyStyle, sampleReactMs, splitLongSegment, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
@@ -107,9 +107,6 @@ export class AgentRuntime {
 
       const recent = this.recentReplies.get(key) ?? []
       const ar = config.humanlike.antiRepeat
-      const hot = ar.enabled ? hotWords(recent, ar) : []
-      const arHint = ar.enabled ? buildAntiRepeatHint(hot, recent) : ''
-      const arMsg: ChatMessage | null = arHint ? { role: 'system', content: arHint, time: Date.now() } : null
 
       const scopeLine = thread.kind === 'group' && triggerNick
         ? `（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）`
@@ -132,7 +129,6 @@ export class AgentRuntime {
       const messages: ChatMessage[] = [
         { role: 'system', content: buildSystemPrompt(thread.kind) },
         ...hist,
-        ...(arMsg ? [arMsg] : []),
         ...(scopeMsg ? [scopeMsg] : []),
         userMsg,
       ]
@@ -182,13 +178,13 @@ export class AgentRuntime {
       tokensOut = llm.tokensOut ?? 0
       cost = llm.cost ?? 0
       let raw = llm.text
-      // 模型沉默（没调 reply 也没输出）→ 概率兜底补一句，否则真沉默
-      if (!raw && !tools.context.sentByTool && Math.random() < config.agent.silentReplyProb) {
+      // 模型没调 reply 也没输出内容 → 强制补一句。回不回由外部系统决定；走到这步就是"决定回"。
+      if (!raw && !tools.context.sentByTool) {
         const fb = await callLlmWithProviders(messages)
         raw = fb.text
       }
       if (!raw && !tools.context.sentByTool) {
-        console.log(`[V2] ${key} 沉默（未调 reply）`)
+        console.log(`[V2] ${key} 无输出（模型未生成）`)
         status = 'skipped'
         return rec
       }

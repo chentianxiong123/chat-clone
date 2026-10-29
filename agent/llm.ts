@@ -161,9 +161,9 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
   let tokensIn = 0
   let tokensOut = 0
   let cost = 0
+  let toolCalls = 0
   for (const p of chain) {
     const working: any[] = base.map(m => ({ ...m }))
-    let toolCalls = 0
     let toolsEnabled = opts.tools.length > 0
 
     for (let iter = 0; iter < maxIter; iter++) {
