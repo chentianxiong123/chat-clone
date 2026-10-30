@@ -51,8 +51,8 @@ bot.on('message.group.normal', async e => {
   }
 })
 
-// ── 私聊消息 ──
-bot.on('message.private', async e => {
+// ── 私聊消息（node-napcat-ts 只发 message.private.friend / message.private.group，无聚合 message.private）──
+const onPrivate = async (e: { user_id: number; self_id: number; sender?: { nickname?: string }; raw_message: string }): Promise<void> => {
   try {
     if (e.user_id === e.self_id) return
     const text = e.raw_message.trim()
@@ -66,10 +66,14 @@ bot.on('message.private', async e => {
   } catch (err) {
     console.error('[Bot] 私聊处理错误:', err)
   }
-})
+}
+bot.on('message.private.friend', onPrivate)
+bot.on('message.private.group', onPrivate)
 
-bot.on('ws.reconnect', () => core.setConnected(false))
-bot.on('ws.close', () => core.setConnected(false))
+// ── 连接状态（库实际发 socket.open/close/error，无 ws.* 事件）──
+bot.on('socket.open', () => core.setConnected(true))
+bot.on('socket.close', () => core.setConnected(false))
+bot.on('socket.error', () => core.setConnected(false))
 
 core.onReply = async (scene, id, reply) => {
   if (scene === 'private') {

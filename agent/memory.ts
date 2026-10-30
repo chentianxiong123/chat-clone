@@ -178,7 +178,7 @@ export async function compressDialog(
     }
   }
 
-  if (!oldRounds.length) return { dialog: recentRounds, summary }
+  if (!oldRounds.length) return { dialog: recentRounds.flat(), summary }
 
   // 拼旧轮次给 LLM 生成摘要
   const oldText = oldRounds.map(r => r.map(m => `${m.role === 'user' ? '用户' : '我'}: ${m.content}`).join('\n')).join('\n---\n')
@@ -200,7 +200,7 @@ export async function compressDialog(
       ]
     : []
 
-  return { dialog: [...summaryPair, ...recentRounds], summary: merged }
+  return { dialog: [...summaryPair, ...recentRounds.flat()], summary: merged }
 }
 
 /** 判断是否应压缩 */

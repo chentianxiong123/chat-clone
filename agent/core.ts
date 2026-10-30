@@ -50,7 +50,7 @@ export interface AgentSnapshot {
   selfName: string
   lastReplyAt: number
   cooldownLeftMs: number
-  batchN: number
+  batchN: string
   batchT: number
   privateBatchN: number
   privateBatchT: number
