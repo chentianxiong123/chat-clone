@@ -397,6 +397,13 @@
             <input id="svc-napcat-host" class="input input-sm input-bordered w-full mt-1"></label>
           <label class="block"><span class="text-slate-500">NapCat 端口</span>
             <input id="svc-napcat-port" type="number" class="input input-sm input-bordered w-full mt-1"></label>
+          <label class="block"><span class="text-slate-500">OneBot 协议（ws/wss）</span>
+            <select id="svc-napcat-protocol" class="select select-sm select-bordered w-full mt-1">
+              <option value="ws">ws</option>
+              <option value="wss">wss</option>
+            </select></label>
+          <label class="block"><span class="text-slate-500">NapCat Token（留空则不鉴权）</span>
+            <input id="svc-napcat-token" type="password" autocomplete="off" class="input input-sm input-bordered w-full mt-1"></label>
           <label class="block"><span class="text-slate-500">WebUI 主机</span>
             <input id="svc-webui-host" class="input input-sm input-bordered w-full mt-1"></label>
           <label class="block"><span class="text-slate-500">WebUI 端口</span>

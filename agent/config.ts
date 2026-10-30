@@ -52,10 +52,13 @@ function parseDrowsy(raw: string): { start: string; end: string; prob: number }[
 }
 
 export const config = {
-  // ── NapCat 连接 ───────────────────────────────────────────────────────────
+  // ── 协议端连接（OneBot v11）────────────────────────────────────────────────
+  // NapCat / Lagrange.OneBot / SnowLuma 等都走 OneBot v11，换协议端只需改 host/port/token
   napcat: {
-    host: process.env.NAPCAT_HOST || '127.0.0.1',
-    port: Number(process.env.NAPCAT_PORT) || 3001,
+    host: process.env.NAPCAT_HOST || process.env.ONEBOT_HOST || '127.0.0.1',
+    port: Number(process.env.NAPCAT_PORT || process.env.ONEBOT_PORT) || 3001,
+    token: process.env.NAPCAT_TOKEN || process.env.ONEBOT_TOKEN || '',
+    protocol: (process.env.NAPCAT_PROTOCOL || process.env.ONEBOT_PROTOCOL || 'ws') as 'ws' | 'wss',
   },
   // ── LLM 调用 ──────────────────────────────────────────────────────────────
   llm: {
@@ -231,10 +234,6 @@ export const config = {
     // ── 已停用（扫进垃圾堆 2026-10-30）──
     // 重级脏话硬拦 / 忽略短 / 防重复(反模板) / 刷屏抑制 均已从 core/v2 移除——
     // 用户定调：粗口靠数据自然体现、不靠规则拦截；行为少干预。字段保留仅供类型兼容。
-    profanity: { hardBlock: false, replace: '真服了' },
-    ignoreShort: { minChars: 0, prob: 0 },
-    antiRepeat: { enabled: false, window: 20, minCount: 3, ratio: 0.25, dropSim: 0.85, maxHint: 6 },
-    burst: { maxReplies: Number.MAX_SAFE_INTEGER, windowMs: 180_000, extraCooldownMs: 0 },
     // ── B. 反应与节奏 —— 多久回 ──
     react: {
       minMs: Number(process.env.REPLY_REACT_MIN_MS) || 2500,
@@ -247,12 +246,6 @@ export const config = {
       privateMs: Number(process.env.PRIVATE_REPLY_COOLDOWN) || 10_000,
       // 冷却/防抖/首条迟疑的随机抖动比（±ratio），破坏固定节奏防封控
       jitter: clamp01(envNum('HL_JITTER_RATIO', 0.35)),
-    },
-    // 刷屏抑制：窗口内连续回复超 maxReplies 次 → 额外冷却（模拟真人被盯烦了会冷场）
-    burst: {
-      maxReplies: Number(process.env.HL_BURST_MAX) || 3,
-      windowMs: Number(process.env.HL_BURST_WINDOW_MS) || 180_000,
-      extraCooldownMs: Number(process.env.HL_BURST_EXTRA_COOLDOWN_MS) || 60_000,
     },
     // ── C. 打字节奏 —— 怎么发 ──
     typing: {

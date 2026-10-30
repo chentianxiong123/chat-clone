@@ -561,7 +561,7 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       if (path === '/api/service/config' && req.method === 'GET') {
         return json(res, 200, {
           ok: true,
-          napcat: { host: config.napcat.host, port: config.napcat.port },
+          napcat: { host: config.napcat.host, port: config.napcat.port, protocol: config.napcat.protocol, hasToken: !!config.napcat.token },
           webui: { host: config.webui.host, port: config.webui.port },
           sim: { realGroups: config.sim.realGroups, maxThreads: config.sim.maxThreads },
         })
@@ -571,6 +571,8 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         const patch: Record<string, string> = {}
         if (typeof body.napcatHost === 'string' && body.napcatHost.trim()) patch.NAPCAT_HOST = body.napcatHost.trim()
         if (body.napcatPort != null) patch.NAPCAT_PORT = String(Math.max(1, Math.round(Number(body.napcatPort) || 1)))
+        if (typeof body.napcatToken === 'string') patch.NAPCAT_TOKEN = body.napcatToken.trim()
+        if (typeof body.napcatProtocol === 'string' && ['ws', 'wss'].includes(body.napcatProtocol)) patch.NAPCAT_PROTOCOL = body.napcatProtocol
         if (typeof body.webuiHost === 'string' && body.webuiHost.trim()) patch.WEBUI_HOST = body.webuiHost.trim()
         if (body.webuiPort != null) patch.WEBUI_PORT = String(Math.max(1, Math.round(Number(body.webuiPort) || 1)))
         if (typeof body.realGroups === 'string') patch.SIM_REAL_GROUPS = body.realGroups.split(',').map(s => s.trim()).filter(Boolean).join(',')

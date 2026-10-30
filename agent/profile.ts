@@ -24,7 +24,6 @@ export type HumanlikeProfileOverride = Partial<{
   replyProb: Partial<HumanlikeProfile['replyProb']>
   react: Partial<HumanlikeProfile['react']>
   cooldown: Partial<HumanlikeProfile['cooldown']>
-  burst: Partial<HumanlikeProfile['burst']>
   typing: Partial<HumanlikeProfile['typing']>
   style: Partial<HumanlikeProfile['style']>
   schedule: Partial<HumanlikeProfile['schedule']>
@@ -188,7 +187,6 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
       hourly,
       batchPenalty: { threshold: 10, factor: round2(batchFactor) },
     },
-    burst: { maxReplies: clamp(Math.round(safe(stats.burstLen.p90)), 2, 6) },
   }
 }
 

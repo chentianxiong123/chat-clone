@@ -604,6 +604,9 @@ async function loadServiceConfig() {
   if (!res.ok) return
   $('svc-napcat-host').value = res.napcat?.host || ''
   $('svc-napcat-port').value = res.napcat?.port ?? ''
+  $('svc-napcat-protocol').value = res.napcat?.protocol === 'wss' ? 'wss' : 'ws'
+  $('svc-napcat-token').value = ''
+  $('svc-napcat-token').placeholder = res.napcat?.hasToken ? '已设置（留空保持不变）' : '未设置'
   $('svc-webui-host').value = res.webui?.host || ''
   $('svc-webui-port').value = res.webui?.port ?? ''
   $('svc-real-groups').value = (res.sim?.realGroups || []).join(',')
@@ -613,11 +616,14 @@ async function saveServiceConfig() {
   const body = {
     napcatHost: $('svc-napcat-host').value.trim(),
     napcatPort: Number($('svc-napcat-port').value),
+    napcatProtocol: $('svc-napcat-protocol').value,
     webuiHost: $('svc-webui-host').value.trim(),
     webuiPort: Number($('svc-webui-port').value),
     realGroups: $('svc-real-groups').value.trim(),
     simMax: Number($('svc-sim-max').value),
   }
+  const tok = $('svc-napcat-token').value.trim()
+  if (tok) body.napcatToken = tok
   const r = await fetch('/api/service/config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })

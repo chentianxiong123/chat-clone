@@ -13,9 +13,10 @@ startWebUI(core, v2)
 
 // ── NapCat 连接（失败不 crash，WebUI 仍可工作）──
 const bot = new NCWebsocket({
-  protocol: 'ws',
+  protocol: config.napcat.protocol,
   host: config.napcat.host,
   port: config.napcat.port,
+  accessToken: config.napcat.token || undefined,
   reconnection: { enable: true, attempts: 10, delay: 3000 },
 })
 v2.attachQQ(new QQAdapter(bot))
