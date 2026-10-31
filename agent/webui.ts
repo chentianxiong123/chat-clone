@@ -121,6 +121,18 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const path = decodeURIComponent(url.pathname)
 
+    // ── 可选鉴权：config.webui.token 设了才校验（Bearer / ?token=）──
+    const wToken = config.webui.token
+    if (wToken) {
+      const authOk =
+        req.headers.authorization === `Bearer ${wToken}` || url.searchParams.get('token') === wToken
+      if (!authOk) {
+        res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' })
+        res.end(JSON.stringify({ error: 'unauthorized' }))
+        return
+      }
+    }
+
     try {
       // ── 模型管理（独立路由表）──
       if (await router.dispatch({ req, res, url, path })) return

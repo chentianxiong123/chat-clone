@@ -52,13 +52,20 @@ function parseDrowsy(raw: string): { start: string; end: string; prob: number }[
 }
 
 export const config = {
-  // ── 协议端连接（OneBot v11）────────────────────────────────────────────────
-  // NapCat / Lagrange.OneBot / SnowLuma 等都走 OneBot v11，换协议端只需改 host/port/token
+  // ── 协议端连接（抽象层）──────────────────────────────────────────────────
+  // 协议端 = "QQ 消息 → 机器人能吃的协议" 的插头。核心只认 BotTransport 接口，
+  // 通过 channel 自由切换：napcat（OneBot 11，node-napcat-ts）｜milky（Milky 协议，WS /event + HTTP）
+  channel: (process.env.AGENT_CHANNEL || 'napcat') as 'napcat' | 'milky',
   napcat: {
     host: process.env.NAPCAT_HOST || process.env.ONEBOT_HOST || '127.0.0.1',
     port: Number(process.env.NAPCAT_PORT || process.env.ONEBOT_PORT) || 3001,
     token: process.env.NAPCAT_TOKEN || process.env.ONEBOT_TOKEN || '',
     protocol: (process.env.NAPCAT_PROTOCOL || process.env.ONEBOT_PROTOCOL || 'ws') as 'ws' | 'wss',
+  },
+  milky: {
+    host: process.env.MILKY_HOST || '127.0.0.1',
+    port: Number(process.env.MILKY_PORT) || 3000,
+    token: process.env.MILKY_TOKEN || '',
   },
   // ── LLM 调用 ──────────────────────────────────────────────────────────────
   llm: {
@@ -372,8 +379,10 @@ export const config = {
   },
   // ── WebUI ─────────────────────────────────────────────────────────────────
   webui: {
-    host: process.env.WEBUI_HOST || '0.0.0.0',
+    host: process.env.WEBUI_HOST || '127.0.0.1',
     port: Number(process.env.WEBUI_PORT) || 8085,
+    // 可选鉴权：设了才校验（Bearer / ?token=），空=不鉴权（配合 127.0.0.1 本机开发）
+    token: process.env.WEBUI_TOKEN || '',
   },
   // ── 日志 ──────────────────────────────────────────────────────────────────
   log: {

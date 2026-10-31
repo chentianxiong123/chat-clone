@@ -1,85 +1,86 @@
 import { NCWebsocket } from 'node-napcat-ts'
 import { config } from './config.js'
-import { AgentCore, sceneKey, type SceneType } from './core.js'
+import { AgentCore } from './core.js'
 import { startWebUI } from './webui.js'
 import { createKernel } from './v2/kernel.js'
 import { QQAdapter } from './v2/channels/qq.js'
+import { NapCatTransport } from './v2/channels/napcat.js'
+import { MilkyTransport } from './v2/channels/milky.js'
+import type { BotTransport } from './v2/channels/transport.js'
 
 const core = new AgentCore()
 const v2 = createKernel()
 
-// ── WebUI（先起，便于连不上 NapCat 时也能进控制台）──
+// ── WebUI（先起，便于连不上协议端时也能进控制台）──
 startWebUI(core, v2)
 
-// ── NapCat 连接（失败不 crash，WebUI 仍可工作）──
-const bot = new NCWebsocket({
-  protocol: config.napcat.protocol,
-  host: config.napcat.host,
-  port: config.napcat.port,
-  accessToken: config.napcat.token || undefined,
-  reconnection: { enable: true, attempts: 10, delay: 3000 },
-})
-v2.attachQQ(new QQAdapter(bot))
+// ── 协议端插头：按 config.channel 自由切换（napcat | milky），核心零改动 ──
+let transport: BotTransport
+if (config.channel === 'milky') {
+  transport = new MilkyTransport({ host: config.milky.host, port: config.milky.port, token: config.milky.token })
+} else {
+  const bot = new NCWebsocket({
+    protocol: config.napcat.protocol,
+    host: config.napcat.host,
+    port: config.napcat.port,
+    accessToken: config.napcat.token || undefined,
+    reconnection: { enable: true, attempts: 10, delay: 3000 },
+  })
+  const nap = new NapCatTransport(bot)
+  nap.attach()
+  v2.attachQQ(new QQAdapter(bot))
+  transport = nap
+}
+const channelName = config.channel === 'milky' ? 'Milky' : 'NapCat'
 
 try {
-  await bot.connect()
+  await transport.connect()
   core.setConnected(true)
-  console.log(`[Bot] 已连接 NapCat (攒批 N=${core.getSnapshot().batchN}, T=${core.getSnapshot().batchT}ms)`)
+  console.log(`[Bot] 已连接 ${channelName} (攒批 N=${core.getSnapshot().batchN}, T=${core.getSnapshot().batchT}ms)`)
 } catch (e) {
-  console.error('[Bot] 连接 NapCat 失败（稍后重连）:', (e as Error).message)
+  console.error(`[Bot] 连接 ${channelName} 失败（稍后重连）:`, (e as Error).message)
   core.setConnected(false)
 }
 
+// ── 连接状态 ──
+transport.onStatus(ok => core.setConnected(ok))
+
 // ── 群聊消息 ──
-bot.on('message.group.normal', async e => {
+transport.onGroup(e => {
   try {
-    // 自己发的消息跳过
-    if (e.user_id === e.self_id) return
-    const text = e.raw_message.trim()
-    if (!text) return
-    const atBot = (e.raw_message || '').includes(`[CQ:at,qq=${e.self_id}]`)
     core.handleMessage({
       scene: 'group',
-      groupId: e.group_id,
-      senderId: e.user_id,
-      senderNick: e.sender?.nickname || '朋友',
-      text,
-      atBot,
+      groupId: e.groupId,
+      senderId: e.senderId,
+      senderNick: e.senderNick,
+      text: e.text,
+      atBot: e.atBot,
     })
   } catch (err) {
     console.error('[Bot] 群消息处理错误:', err)
   }
 })
 
-// ── 私聊消息（node-napcat-ts 只发 message.private.friend / message.private.group，无聚合 message.private）──
-const onPrivate = async (e: { user_id: number; self_id: number; sender?: { nickname?: string }; raw_message: string }): Promise<void> => {
+// ── 私聊消息 ──
+transport.onPrivate(e => {
   try {
-    if (e.user_id === e.self_id) return
-    const text = e.raw_message.trim()
-    if (!text) return
     core.handleMessage({
       scene: 'private',
-      senderId: e.user_id,
-      senderNick: e.sender?.nickname || '朋友',
-      text,
+      senderId: e.senderId,
+      senderNick: e.senderNick,
+      text: e.text,
     })
   } catch (err) {
     console.error('[Bot] 私聊处理错误:', err)
   }
-}
-bot.on('message.private.friend', onPrivate)
-bot.on('message.private.group', onPrivate)
+})
 
-// ── 连接状态（库实际发 socket.open/close/error，无 ws.* 事件）──
-bot.on('socket.open', () => core.setConnected(true))
-bot.on('socket.close', () => core.setConnected(false))
-bot.on('socket.error', () => core.setConnected(false))
-
+// ── 回复出口（核心只调这里，NapCat/Milky 各自实现）──
 core.onReply = async (scene, id, reply) => {
   if (scene === 'private') {
-    await bot.send_private_msg({ user_id: id, message: [{ type: 'text', data: { text: reply } }] })
+    await transport.sendPrivate(id, reply)
   } else {
-    await bot.send_group_msg({ group_id: id, message: [{ type: 'text', data: { text: reply } }] })
+    await transport.sendGroup(id, reply)
   }
 }
 
