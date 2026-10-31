@@ -8,7 +8,9 @@ export interface MilkyOptions {
 }
 
 interface MilkyEvent {
-  type?: string
+  event_type?: string
+  time?: number
+  self_id?: number
   data?: {
     message_scene?: 'group' | 'friend'
     peer_id?: number
@@ -31,7 +33,8 @@ export class MilkyTransport implements BotTransport {
   constructor(private readonly opt: MilkyOptions) {}
 
   private get httpBase(): string {
-    return `http://${this.opt.host}:${this.opt.port}`
+    // Milky 的 HTTP API 统一前缀 /api（如 /api/send_group_message、/api/get_group_list）
+    return `http://${this.opt.host}:${this.opt.port}/api`
   }
 
   private get wsUrl(): string {
@@ -59,7 +62,7 @@ export class MilkyTransport implements BotTransport {
     } catch {
       return
     }
-    if (evt.type !== 'message_receive') return
+    if (evt.event_type !== 'message_receive') return
     const d = evt.data
     if (!d) return
     const text = (d.segments ?? [])
