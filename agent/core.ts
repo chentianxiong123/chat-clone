@@ -1,6 +1,7 @@
 import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
 import { buildSystemPrompt } from './prompt.js'
+import { searchRag } from './rag.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
 import { relevanceScore } from './dynamics.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
@@ -406,7 +407,12 @@ export class AgentCore {
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
         : '\n'
-      const userMsg: ChatMessage = { role: 'user', content: `${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
+      let refBlock = ''
+      try {
+        const ref = await searchRag(ctx)
+        if (ref) refBlock = `【你们以前类似话题怎么聊的——尽量用里面出现过的词和说法来说，别自己另编】\n${ref}\n\n`
+      } catch { /* ignore */ }
+      const userMsg: ChatMessage = { role: 'user', content: `${refBlock}${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
 
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
@@ -415,7 +421,7 @@ export class AgentCore {
       // reply 工具攒句（可多次=短句分条）；模型不调 reply 且无 content = 沉默（真人挑话接）。
       const toolReplies: string[] = []
       const executors = createAgentExecutors(key, {
-        reply: async (text) => { toolReplies.push(text) },
+        reply: async (texts) => { toolReplies.push(...texts) },
         getState: () => buildStatePrompt(this.recentState),
       })
       const llmTools: ToolSpec[] = [
@@ -529,7 +535,7 @@ export class AgentCore {
 
       const toolReplies: string[] = []
       const executors = createAgentExecutors(key, {
-        reply: async (text) => { toolReplies.push(text) },
+        reply: async (texts) => { toolReplies.push(...texts) },
         getState: () => buildStatePrompt(this.recentState),
       })
       const llmTools: ToolSpec[] = [

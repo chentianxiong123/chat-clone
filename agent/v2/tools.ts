@@ -26,9 +26,9 @@ export function createToolRegistry(
   const context: ToolContext = { sentByTool: false, sentTexts: [] }
   const key = threadKey(thread)
   const executors = createAgentExecutors(key, {
-    reply: async (text) => {
+    reply: async (texts) => {
       context.sentByTool = true
-      context.sentTexts.push(text)
+      context.sentTexts.push(...texts)
     },
     getState: () => (getState ? getState() : ''),
   })

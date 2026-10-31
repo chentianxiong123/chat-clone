@@ -119,14 +119,21 @@ export const REPLY_TOOL: ToolSpec = {
   function: {
     name: 'reply',
     description:
-      '开口说一句话。要说话就调用它；想分几条说就连续调用几次，每次一条消息（按条发送，不要用换行拼成一条）。' +
-      '内容直接是你要对朋友说的话，像真人打字，别带序号/引号。',
+      '开口说话。把你要发的所有消息一次性放进 messages 数组，发几条你自己定（1 条就 1 个元素）。' +
+      `最多 ${config.agent.replyMaxSegments} 条；通常很短，像真人发群消息，别堆、别长篇解释。` +
+      '内容直接是你要对朋友说的话，别带序号/引号。',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: '要说的话（一条消息，像真人打字，别带序号/引号）' },
+        messages: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: config.agent.replyMaxSegments,
+          description: '按顺序发送的每条消息，一条一个元素，通常很短（几个字到一两句）。',
+        },
       },
-      required: ['text'],
+      required: ['messages'],
     },
   },
 }
@@ -148,7 +155,7 @@ export const GET_STATE_TOOL: ToolSpec = {
 
 /** 工具执行器回调：reply 说一句（由 core/v2 攒句+发送），getState 返回纯数据状态 */
 export interface AgentToolHooks {
-  reply: (text: string) => Promise<void>
+  reply: (texts: string[]) => Promise<void>
   getState: () => Promise<string> | string
 }
 
@@ -163,9 +170,12 @@ export function createAgentExecutors(
   return {
     ...createMemoryExecutors(sceneKey),
     reply: async (args: Record<string, unknown>) => {
-      const text = String(args?.text ?? '').trim()
-      if (!text) return '（没说：内容为空）'
-      await hooks.reply(text)
+      const raw = args?.messages
+      const texts = (Array.isArray(raw) ? raw : raw == null ? [] : [raw])
+        .map((t) => String(t ?? '').trim())
+        .filter(Boolean)
+      if (!texts.length) return '（没说：内容为空）'
+      await hooks.reply(texts)
       return '（已说）'
     },
     get_state: async () => {
