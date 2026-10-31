@@ -8,6 +8,7 @@
     "mine": "node --env-file=.env --import tsx mine.ts"
   },
   "dependencies": {
+    "@node-rs/jieba": "^2.0.4",
     "node-napcat-ts": "^0.4.25",
     "openai": "^7.5.0",
     "undici": "^8.12.3",
