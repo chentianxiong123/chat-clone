@@ -2,6 +2,8 @@ import { config } from './config.js'
 import { embed } from './llm.js'
 import { DatabaseSync } from 'node:sqlite'
 import { statSync } from 'node:fs'
+import { Jieba } from '@node-rs/jieba'
+import { dict } from '@node-rs/jieba/dict.js'
 
 export interface RagHit {
   chunkId: string
@@ -59,17 +61,34 @@ const STOP_WORDS = new Set([
   '现在', '真的', '是不是', '有没有', '算了', '吧唧', '霍霍', '哇', '吼吼', '嘻嘻', '哈哈', '呵呵', '确实',
   '知道', '觉得', '感觉', '时候', '东西', '事情', '问题', '地方', '今天', '明天', '昨天', '晚上', '白天',
   '上来', '上去', '下来', '下去', '过来', '过去', '起来', '出去', '进来', '进去', '哈', '嗯嗯', '好吧',
+  // 格式/CQ 标记噪音（非虚词，是聊天记录里的标记垃圾，必须滤）
+  'user', 'assistant', 'image', 'https', 'http', 'com', 'file', 'source', 'ai', 'url', 'cq', 'qq', 'png', 'jpg', 'gif',
+  // 高频虚词（扫全库 Top 词频：fts/like 的 OR 匹配会因这些召回不相关，必须滤）
+  '上次', '到底', '这个', '现在', '不是', '就是', '一个', '怎么', '知道', '我们', '可以', '东西', '觉得',
+  '没有', '这样', '这么', '不会', '自己', '还是', '但是', '一样', '那个', '因为', '他们', '这些', '为什么',
+  '应该', '不过', '是不是', '肯定', '确实', '真的', '时候', '大家', '可能', '这种', '以前', '一下', '出来',
+  '其实', '然后', '发现', '很多', '已经', '那些', '还有', '一直', '感觉', '如果', '需要', '主要', '一定',
+  '正常', '虽然', '不行', '只能', '所以', '一点', '不了', '只是', '只有', '看看', '好像', '那么', '而且',
+  '认为', '两个', '差不多', '反正', '有点', '之前', '以为', '为了', '完全', '不要', '导致', '根本', '结果',
+  '时间', '那种', '估计', '记得', '起来', '可惜', '最后', '意思', '不想', '我要', '的话', '全是', '后面',
+  '不如', '今天', '特别', '地方', '事情', '里面', '容易', '一般', '而已', '怎么样', '当时', '只要',
+  // 口语/脏话（高频无检索意义）
+  '霍霍', '离谱', '吼吼', '几把', '嘿嘿', '司马', '恶心', '废物', '垃圾', '该死', '卧槽', '牛逼', '妈的', '傻逼', '他妈',
 ])
 
+// jieba 真词分词器（@node-rs/jieba + 默认词典；new Jieba() 是空词典，必须 withDict）
+const _jieba = Jieba.withDict(dict)
+
 function extractKeywords(text: string): string[] {
-  const segs = text.match(/[\u4e00-\u9fa5a-zA-Z0-9]{2,}/g) || []
+  // 真词：jieba 分词（整词，非 2-gram），滤格式噪音/单字/纯数字标点/停用词
+  const words = _jieba.cut(text, false)
   const out: string[] = []
-  for (const s of segs) {
-    const max = s.length > 1 ? s.length - 1 : 1
-    for (let i = 0; i < Math.max(1, max); i++) {
-      const w = s.slice(i, i + 2)
-      if (w.length >= 2 && !STOP_WORDS.has(w) && !out.includes(w)) out.push(w)
-    }
+  for (const w of words) {
+    const t = w.trim().toLowerCase()
+    if (t.length < 2) continue
+    if (/^[\d\s.,!?/\\|_:\-"'()\[\]{}]+$/.test(t)) continue
+    if (STOP_WORDS.has(t)) continue
+    if (!out.includes(t)) out.push(t)
   }
   return out.slice(0, 6)
 }
@@ -147,7 +166,9 @@ function searchLike(query: string, topK: number): RagHit[] {
       ORDER BY score DESC, RANDOM()
       LIMIT ?
     `).all(topK) as Array<{ chunkId: string; date: string; text: string; score: number }>
-    return rows.map(r => ({ ...r, method: 'like' as const }))
+    // like 归一化：命中关键词占比（0~1），全词命中=1，部分=分数——比裸命中数更能反映相关度
+    const total = Math.max(kws.length, 1)
+    return rows.map(r => ({ ...r, score: r.score / total, method: 'like' as const }))
   } catch (e) {
     console.warn('[RAG] LIKE 检索失败:', (e as Error).message)
     return []
@@ -181,12 +202,25 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
 
   let picked: RagHit[] = []
   if (mode === 'all') {
-    const seen = new Set<string>()
-    const merged: RagHit[] = []
-    for (const r of [...res.vec, ...res.fts, ...res.like]) {
-      if (!seen.has(r.chunkId)) { seen.add(r.chunkId); merged.push(r) }
+    // 三路加权归一化合并：各路线内 min-max 归一到 0~1，再乘权重——解决量纲不同（vec 0~1 / fts 0~几十 / like 0~1）
+    // 权重：vec 语义最准 > fts 词匹配 > like 兜底；vec 不可用时 fts 主导、like 补
+    const weights: Record<'vec' | 'fts' | 'like', number> = { vec: 0.5, fts: 0.35, like: 0.15 }
+    const norm = (arr: RagHit[]): RagHit[] => {
+      if (!arr.length) return []
+      const mx = Math.max(...arr.map(h => h.score))
+      const mn = Math.min(...arr.map(h => h.score))
+      const span = mx - mn || 1
+      return arr.map(h => ({ ...h, score: (h.score - mn) / span }))
     }
-    picked = merged.sort((a, b) => b.score - a.score)
+    const best = new Map<string, RagHit>()
+    for (const m of ['vec', 'fts', 'like'] as const) {
+      for (const h of norm(byMethod(m))) {
+        const s = h.score * weights[m]
+        const cur = best.get(h.chunkId)
+        if (!cur || s > cur.score) best.set(h.chunkId, { ...h, score: s })
+      }
+    }
+    picked = [...best.values()].sort((a, b) => b.score - a.score)
   } else if (mode === 'random') {
     const roads = ['vec', 'fts', 'like'].filter(m => byMethod(m).length)
     if (roads.length) picked = byMethod(roads[Math.floor(Math.random() * roads.length)])
