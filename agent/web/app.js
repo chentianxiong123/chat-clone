@@ -814,6 +814,7 @@ const MECH_FIELDS = [
   ['PRIVATE_REPLY_PROB', '私聊回复概率', 'range', 0.01],
   ['REPLY_COOLDOWN', '群冷却(ms)', 'number', 1000],
   ['PRIVATE_REPLY_COOLDOWN', '私聊冷却(ms)', 'number', 1000],
+  ['REPLY_MAX_SEGMENTS', '一轮最多回复条数', 'number', 1],
   ['RAG_VEC_PROB', '向量升级概率', 'range', 0.01],
   ['RAG_TOP_K', '每路 topK', 'number', 1],
   ['RAG_VEC_MIN_SCORE', '向量质量阈值', 'range', 0.01],

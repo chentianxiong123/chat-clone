@@ -547,7 +547,8 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         const keys = ['BATCH_N_MIN','BATCH_N_MAX','BATCH_T','PRIVATE_BATCH_N','PRIVATE_BATCH_T',
           'GROUP_REPLY_PROB','PRIVATE_REPLY_PROB','REPLY_COOLDOWN','PRIVATE_REPLY_COOLDOWN',
           'RAG_VEC_PROB','RAG_TOP_K','RAG_VEC_MIN_SCORE','RAG_RECALL_PROB','RAG_TOOL_MAX_ITER','RAG_TOOL_MAX_ITEMS',
-          'MEMORY_MAX_TOKENS','MEMORY_COMPRESS_THRESHOLD','MEMORY_KEEP_RECENT_RATIO','RAG_RECALL_MODE']
+          'MEMORY_MAX_TOKENS','MEMORY_COMPRESS_THRESHOLD','MEMORY_KEEP_RECENT_RATIO','RAG_RECALL_MODE',
+          'REPLY_MAX_SEGMENTS']
         const patch: Record<string, string> = {}
         for (const k of keys) {
           if (body[k] == null || body[k] === '') continue

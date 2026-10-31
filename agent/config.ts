@@ -174,6 +174,8 @@ export const config = {
   agent: {
     maxHistory: Number(process.env.MAX_HISTORY) || 40,
     respondMode: process.env.RESPOND_MODE || 'auto', // "auto" | "mention"
+    // 一轮回复最多几条（防模型一口气刷太多；REPLY_MAX_SEGMENTS，WebUI 可配）
+    replyMaxSegments: Math.max(1, Math.round(Number(process.env.REPLY_MAX_SEGMENTS) || 3)),
     // 私聊独立策略：攒批条数/时间
     privateBatchN: Number(process.env.PRIVATE_BATCH_N) || 1,
     privateBatchT: Number(process.env.PRIVATE_BATCH_T) || 30_000,
