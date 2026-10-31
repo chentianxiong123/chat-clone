@@ -258,7 +258,10 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
     .slice(0, MAX_PER_CHUNK)
   let total = 0
   const lines: string[] = []
-  for (const r of picked.slice(0, MAX_CHUNKS)) {
+  // 随机化：从高分池随机抽，避免每次都召回同一批原句（防机械复读；多样性靠语料池）
+  const pool = picked.slice(0, Math.max(MAX_CHUNKS * 3, 12))
+  const sampled = [...pool].sort(() => Math.random() - 0.5).slice(0, MAX_CHUNKS)
+  for (const r of sampled) {
     const pairLines = pairs(r.text)
     if (!pairLines.length) continue
     for (const line of pairLines) {

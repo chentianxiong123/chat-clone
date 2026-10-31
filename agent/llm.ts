@@ -64,6 +64,7 @@ export async function callLlmWithProviders(messages: ChatMessage[], opts: {
           messages,
           max_tokens: maxTokens,
           temperature,
+          frequency_penalty: 0.3,
         })
         const content = resp.choices?.[0]?.message?.content
         const usage = resp.usage
@@ -175,6 +176,7 @@ export async function callLlmWithTools(messages: ChatMessage[], opts: {
           messages: working,
           max_tokens: maxTokens,
           temperature,
+          frequency_penalty: 0.3,
           ...(toolsEnabled ? { tools: opts.tools as any, tool_choice: 'auto' as const } : {}),
         } as any)
       } catch (e) {
