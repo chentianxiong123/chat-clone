@@ -65,6 +65,8 @@ export class MilkyTransport implements BotTransport {
     if (evt.event_type !== 'message_receive') return
     const d = evt.data
     if (!d) return
+    // bot 自己发的消息会被 Milky 推回，必须过滤（否则当朋友消息触发 → 自回复死循环）
+    if (d.sender_id != null && d.sender_id === evt.self_id) return
     const text = (d.segments ?? [])
       .filter(s => s?.type === 'text')
       .map(s => s?.data?.text ?? '')

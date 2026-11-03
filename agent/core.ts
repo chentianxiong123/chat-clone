@@ -410,7 +410,7 @@ export class AgentCore {
       let refBlock = ''
       try {
         const ref = await searchRag(ctx)
-        if (ref) refBlock = `【你们以前类似话题怎么聊的——尽量用里面出现过的词和说法来说，别自己另编】\n${ref}\n\n`
+        if (ref) refBlock = `【这是从你们以前聊天里提炼的知识库和口癖——用这里的词、说法、知识，但回答朋友现在说的这句，接住当前话题】\n${ref}\n\n`
       } catch { /* ignore */ }
       const userMsg: ChatMessage = { role: 'user', content: `${refBlock}${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
 
@@ -634,9 +634,11 @@ export class AgentCore {
       console.log(`[Core] 分段 ${t}:${id} ${i}: ${seg.slice(0, 40)}`)
     }
     let i = 0
-    for (const raw of segments) {
-      const seg = raw.trimEnd()
-      const isBlank = seg.trim() === ''
+    // 模型可能把多条塞进一个 reply 元素（用 \n 分隔）——按行拆成独立消息，每条一条发
+    const flat = segments.flatMap(s => s.split('\n')).map(s => s.trim())
+    for (const raw of flat) {
+      const seg = raw
+      const isBlank = seg === ''
       if (isBlank && !ty.keepBlank) continue
       i++
       // 每条间隔 = 该条长度对应的"打字时间"（按随机打字速度）+ 随机间隙

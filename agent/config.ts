@@ -285,7 +285,7 @@ export const config = {
       maxSegmentChars: envNum('HL_MAX_SEGMENT_CHARS', 0),
       // 句尾偶发表情
       emojiProb: clamp01(Number(process.env.HL_STYLE_EMOJI_PROB) || 0.15),
-      emojis: (process.env.HL_STYLE_EMOJIS || '😂,😅,🤔,😏,🤤,💦').split(',').map(s => s.trim()).filter(Boolean),
+      emojis: (process.env.HL_STYLE_EMOJIS || '😅,👴').split(',').map(s => s.trim()).filter(Boolean),
       // 语气词/口头禅（开头插入）
       fillerProb: clamp01(Number(process.env.HL_STYLE_FILLER_PROB) || 0.2),
       fillers: (process.env.HL_STYLE_FILLERS || 'emm,啊这,……,2333,离谱').split(',').map(s => s.trim()).filter(Boolean),

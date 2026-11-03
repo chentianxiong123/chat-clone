@@ -290,14 +290,7 @@ export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): strin
     out = lines.join('\n')
   }
 
-  // 2) 开头插入语气词（口头禅）
-  if (chance(fillerProb) && st.fillers.length) {
-    const head = out.trimStart()
-    const pad = out.slice(0, -head.length)
-    const filler = pick(st.fillers)
-    const sep = /^[A-Za-z0-9]/.test(filler) ? ' ' : ''
-    out = pad + filler + sep + head
-  }
+  // 2) 语气词/口头禅由模型自己写（程序不强制插，否则会"是啊啊这"叠词）
 
   // 3) 偶尔错别字（只替换一处，避免满屏违和）
   if (chance(typoProb) && st.typoMap.length) {
