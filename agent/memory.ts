@@ -58,16 +58,16 @@ export function countMessagesTokens(msgs: ChatMessage[]): number {
   return msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0)
 }
 
-// ── 按轮切分（参考 AstrBot round_utils：user→assistant 一组轮）──
+// ── 按轮切分（参考 AstrBot round_utils：每遇 user 开新轮，user+assistant 一组完整轮次）──
 export function splitIntoRounds(msgs: ChatMessage[]): ChatMessage[][] {
   const rounds: ChatMessage[][] = []
   let cur: ChatMessage[] = []
   for (const m of msgs) {
-    cur.push(m)
-    if (m.role === 'assistant') {
+    if (m.role === 'user' && cur.length) {
       rounds.push(cur)
       cur = []
     }
+    cur.push(m)
   }
   if (cur.length) rounds.push(cur)
   return rounds
@@ -186,7 +186,15 @@ export async function compressDialog(
     { role: 'system' as const, content: `你是对话摘要助手。把以下群聊记录压缩成简短中文摘要（2-4句话），保留关键信息和最新进展。只输出摘要内容。` },
     { role: 'user' as const, content: oldText },
   ]
-  const newSummary = await callLlm(summaryPrompt)
+  let newSummary = ''
+  try {
+    newSummary = (await callLlm(summaryPrompt)) || ''
+  } catch (e) {
+    // LLM 摘要失败：回退到"按轮截断"（丢最旧轮），不崩（AstrBot LLMSummaryCompressor 失败回退）
+    console.warn('[Memory] 摘要生成失败，回退按轮截断:', (e as Error).message)
+    const drop = Math.max(1, Math.floor(oldRounds.length / 2))
+    return { dialog: [...recentRounds.flat(), ...oldRounds.slice(drop).flat()], summary }
+  }
 
   const merged = summary && newSummary
     ? `${summary}\n${newSummary}`
