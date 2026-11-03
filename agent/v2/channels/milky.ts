@@ -101,7 +101,17 @@ export class MilkyTransport implements BotTransport {
       headers,
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`Milky ${path} HTTP ${res.status}: ${await res.text()}`)
+    const raw = await res.text()
+    if (!res.ok) throw new Error(`Milky ${path} HTTP ${res.status}: ${raw}`)
+    // Milky 业务失败也是 HTTP 200，靠 body 的 retcode != 0 区分（成功 retcode=0）
+    let retcode = 0
+    let msg = ''
+    try {
+      const j = JSON.parse(raw) as { retcode?: number; message?: string }
+      retcode = j.retcode ?? 0
+      msg = j.message ?? ''
+    } catch { /* 空/非 JSON 响应 */ }
+    if (retcode !== 0) throw new Error(`Milky ${path} retcode ${retcode}${msg ? ': ' + msg : ''}`)
   }
 
   onGroup(cb: (e: GroupMsg) => void): void {
