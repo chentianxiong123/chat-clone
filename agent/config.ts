@@ -187,6 +187,8 @@ export const config = {
     // ── 上下文记忆 / 长期记忆（参考 AstrBot ContextManager）──
     // 持久化开关：把每场景对话存 sqlite，重启不丢
     memoryPersist: process.env.MEMORY_PERSIST !== 'false',
+    // 上下文最多保留多少"轮"（AstrBot enforce_max_turns：超了截掉最旧的轮；-1=不限）
+    maxContextTurns: Math.round(envNum('MAX_CONTEXT_TURNS', 20)),
     // 上下文最大 token（超过阈值触发 LLM 摘要压缩；0=关闭压缩）
     memoryMaxTokens: Number(process.env.MEMORY_MAX_TOKENS) || 16384,
     // 压缩触发阈值比例（占用超 maxTokens*此比例 触发）

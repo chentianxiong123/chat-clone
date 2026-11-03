@@ -6,7 +6,7 @@ import { relevanceScore } from './dynamics.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
-  loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys,
+  loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys, splitIntoRounds,
 } from './memory.js'
 import {
   loadState, saveState, resetState, onMessage, onReply, decayState, computeModifiers,
@@ -387,7 +387,8 @@ export class AgentCore {
     console.log(`[Core] 触发 ${key}: 共 ${g.lines.length} 条（触发者=${triggerNick || '无'}）`)
 
     try {
-      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
+      const full = await this.dialogFor(key)
+      const hist = splitIntoRounds(full).slice(-config.agent.maxContextTurns).flat()
       // 上一条（可配多条）作为"是否接着聊"的参照
       const prevMsgs = hist.slice(-config.humanlike.replyProb.dynamic.contextMsgs)
       const prevTexts = prevMsgs.map(m => m.content)
@@ -525,7 +526,8 @@ export class AgentCore {
     try {
       const mods = computeModifiers(this.recentState)
       const systemPrompt = buildSystemPrompt(t)
-      const hist = (await this.dialogFor(key)).slice(-config.agent.maxHistory)
+      const full = await this.dialogFor(key)
+      const hist = splitIntoRounds(full).slice(-config.agent.maxContextTurns).flat()
       const userMsg: ChatMessage = { role: 'user', content: `${ctx}\n${config.persona.name}：`, time: Date.now() }
       // 主动说话同样要"想一下再开口"，不能到了间隔立刻干巴巴冒泡
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
