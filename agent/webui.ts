@@ -489,9 +489,12 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { ok: true })
       }
 
-      // ── 删除会话记忆已禁用：历史、run 与 token 记录一律保留 ──
+      // ── 清空上下文：POST {key:"p:123"/"g:100"/空=全部} ──
       if (path === '/api/clear' && req.method === 'POST') {
-        return json(res, 403, { error: '删除已禁用。请在聊天页归档会话，记录会完整保留。' })
+        const body = await readBody(req)
+        const key = typeof body?.key === 'string' && body.key ? body.key : undefined
+        core.clearDialog(key as Parameters<typeof core.clearDialog>[0])
+        return json(res, 200, { ok: true, cleared: key ?? 'all' })
       }
 
       // ── 预设模板列表 ──

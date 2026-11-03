@@ -1,7 +1,6 @@
 import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
 import { buildSystemPrompt } from './prompt.js'
-import { searchRag } from './rag.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
 import { relevanceScore } from './dynamics.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
@@ -407,12 +406,7 @@ export class AgentCore {
       const scopeLine = t === 'group' && triggerNick
         ? `\n（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）\n`
         : '\n'
-      let refBlock = ''
-      try {
-        const ref = await searchRag(ctx)
-        if (ref) refBlock = `【这是从你们以前聊天里提炼的知识库和口癖——用这里的词、说法、知识，但回答朋友现在说的这句，接住当前话题】\n${ref}\n\n`
-      } catch { /* ignore */ }
-      const userMsg: ChatMessage = { role: 'user', content: `${refBlock}${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
+      const userMsg: ChatMessage = { role: 'user', content: `${ctx}${scopeLine}${config.persona.name}：`, time: Date.now() }
 
       // 触发后先"反应"：随机延迟再开始生成，模拟真人看到→想→才回（绝不秒回）
       await sleep(Math.max(1000, Math.round(sampleReactMs() * mods.reactDelay)))
@@ -434,6 +428,9 @@ export class AgentCore {
         ...hist,
         userMsg,
       ]
+      if (config.log.level === 'debug') {
+        console.log(`[Core] 上下文: ${messages.map(m => `${m.role}: ${m.content}`).join('\n\n')}`)
+      }
 
       let raw = ''
       if (config.rag.toolsEnabled) {
@@ -548,6 +545,9 @@ export class AgentCore {
         ...hist,
         userMsg,
       ]
+      if (config.log.level === 'debug') {
+        console.log(`[Core] 上下文: ${messages.map(m => `${m.role}: ${m.content}`).join('\n\n')}`)
+      }
       let raw = ''
       if (config.rag.toolsEnabled) {
         const r = await callLlmWithTools(messages, {
@@ -589,18 +589,10 @@ export class AgentCore {
   private async dialogFor(key: SceneKey): Promise<ChatMessage[]> {
     if (this.dialogs.has(key)) return this.dialogs.get(key)!
     if (!config.agent.memoryPersist) return []
-    const { dialog, summary } = loadDialog(key)
-    // 摘要历史以"user 摘要 + assistant 收到"注入（AstrBot 方式）
-    let loaded = dialog
-    if (summary && dialog.length && dialog[0]?.role !== 'user') {
-      loaded = [
-        { role: 'user', content: `我们之前的对话摘要：${summary}`, time: Date.now() },
-        { role: 'assistant', content: '（收到，继续聊）', time: Date.now() },
-        ...dialog,
-      ]
-    }
-    this.dialogs.set(key, loaded)
-    return loaded
+    // 只加载原始对话（最近窗口由调用方 slice 取），不注入摘要——聊天记录归档与上下文解耦
+    const { dialog } = loadDialog(key)
+    this.dialogs.set(key, dialog)
+    return dialog
   }
 
   /** 持久化 + 触发 LLM 摘要压缩（超阈值时） */

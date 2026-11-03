@@ -54,8 +54,8 @@ export const MEMORY_TOOLS: ToolSpec[] = [
     function: {
       name: 'search_past_memory',
       description:
-        '回忆你和朋友过去真实发生过的事、说过的话。当话题涉及过去（对方提到"上次/之前/你说过/记得"等），' +
-        '或你需要确认某件往事时，优先调用它。普通闲聊不要调用。',
+        '查本人和朋友过去真实聊过的话、用过的说法/口癖/梗（从历史聊天提炼的知识库）。' +
+        '每次开口前可用它查一下，用查到的味道接现在这句；想不起就直说记不清。',
       parameters: {
         type: 'object',
         properties: {

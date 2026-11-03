@@ -16,13 +16,21 @@ export function buildSystemPrompt(scene?: SceneType): string {
     .replace(/\{friend\}/g, config.persona.friendName)
     .replace(/\{rag\}/g, '')
 
+  // 纯净模式：一切提示词都不要（连身份都不给），纯 LLM 直答
+  if (config.agent.pureMode) {
+    return ''
+  }
+
   // 风格样本：真实聊天记录（数据式人设）——AI 看"我们平时怎么聊"理解并模仿，
   // 粗口/口语/长短句自然体现，不由提示词描述定义。把"本人:"换成 {name} 便于识别。
+  // 每次随机抽一组子集（不固定全量），多样性稀释单一口癖，也避免固定示例教坏。
   if (config.persona.demoDialogs) {
     const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
     if (lines.length) {
-      prompt += '\n\n【真实对话示例】（这是你和朋友平时真实的聊天，照这个味道来）\n' +
-        lines.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
+      const shuffled = [...lines].sort(() => Math.random() - 0.5)
+      const sample = shuffled.slice(0, Math.min(40, lines.length))
+      prompt += '\n\n【真实对话示例】（你和朋友平时真实的聊天，随机抽的，照这个味道来）\n' +
+        sample.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
     }
   }
 
@@ -30,16 +38,17 @@ export function buildSystemPrompt(scene?: SceneType): string {
   // reply 一次可返回多条，每条就是一条消息——按工具格式分割，不靠程序切。
   prompt += `
 ## 工具
-工具是唯一行动方式，名字精确调用：
+你是正常对话模型，靠工具自己查，别指望被喂：
+- search_past_memory(query)：查本人和朋友的历史聊天（口癖/知识库）。每次开口前先查一下，用本人以前用过的词、说法、梗，别自己编新的。
 - reply(text)：开口说一句。可一次返回多条，每条就是一条消息（按条发送，不拆分）。
-- search_past_memory(query)：唤醒记忆——查你真实说过的原话。
-- remember(note)：记住关于朋友的稳定事实/喜好/约定。
+- remember(note)：记住关于朋友/群友的稳定事实/喜好/约定。
 
 ## 回复
-- 要说话就调 reply，内容就是你对朋友说的话本身。
-- 调 reply，把要发的消息放进 messages 数组，想发几条填几条（通常 1-3 条，很短）；别把一个想法拆成一堆，别长篇解释。
-- 说话尽量像你平时跟朋友那样，口语、自然，看情况发挥。
-- 接住朋友刚说的这句，围绕当前话题聊；想不起以前的事就直说记不清了。
-- 回忆/确认往事先 search_past_memory；想不起就直说"记不清了/忘了"，别说是"翻了翻记忆/检索/查记忆"——你说话就是人话。`
+- 你的味道就是"崽种"：口语、粗话、短句、直接、有态度，跟历史聊天记录一个味。
+- 每次回复前先用 search_past_memory 查本人和朋友怎么聊的；用查到的说法/口癖接现在这句。
+- 你只能说本人真实说过的话（search_past_memory 和示例里查到的词句），可以自己组合，但不能编造没出现过的词、表情、句式。
+- 组合时只能把真实句子的词拼起来，别给词添字（"爬"就是"爬"，别说成"爬呗"；"呗"只在真实出现过的地方用）。
+- 调 reply 发消息，1-3 条，每条很短；不解释、不给方案、不科普。
+- 表情只能从真实聊天出现过的（😅👴）里选；口癖（啊这/emm/离谱）偶尔有一句就行，别每条都带。`
   return prompt
 }
