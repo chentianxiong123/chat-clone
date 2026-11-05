@@ -62,10 +62,14 @@ function renderMilky(s) {
   } else {
     qr.innerHTML = '<div class="text-xs text-slate-500">' + (run ? (s.qrExpired ? '二维码已过期，点「重启」出新码' : '等待 Milky 输出二维码…') : '未运行——点「启动」拉起，它是你的子进程') + '</div>'
   }
-  // 按钮分开：未运行→启动；运行→重启/停止
+  // 按钮分开：未运行→启动；运行→重启/停止。只开一个——仅当前协议端(milky)可控制，napcat 时禁用
+  const mine = protoInfo ? protoInfo.channel === 'milky' : true
   $('milky-start').hidden = run
   $('milky-restart').hidden = !run
   $('milky-stop').hidden = !run
+  ;['milky-start', 'milky-restart', 'milky-stop'].forEach(id => {
+    const b = $(id); if (b) { b.disabled = !mine; b.title = mine ? '' : '当前协议端是 NapCat，切到 Milky 才能控制' }
+  })
   // 协议端当前选择
   if (protoInfo) {
     const active = protoInfo.channel === 'milky'
@@ -86,6 +90,8 @@ function renderNapcat() {
   $('proto-napcat').hidden = active
   $('proto-napcat-badge').hidden = !active
   if (active) $('proto-napcat-badge').textContent = '当前协议端 ✓'
+  // 只开一个：重连仅当前协议端(napcat)可用
+  const rb = $('napcat-reconnect'); if (rb) { rb.disabled = !active; rb.title = active ? '' : '当前协议端是 Milky，切到 NapCat 才能重连' }
 }
 
 function connectProto() {

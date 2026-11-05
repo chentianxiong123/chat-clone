@@ -11,7 +11,7 @@ import { getUsageSummary } from './stats.js'
 import { getActiveProvider, listProviders, listEmbedProviders } from './domain/models/index.js'
 import { listSceneSummaries } from './memory.js'
 import { paths } from './paths.js'
-import { json, readBody } from './transport/http/http.js'
+import { json, readBody, type Ctx } from './transport/http/http.js'
 import { Router } from './transport/http/router.js'
 import { registerModelsRoutes } from './transport/http/routes/models.js'
 import { milkyCtl, MILKY_HTML } from './milky-ctl.js'
@@ -125,15 +125,26 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 
   // ── Milky 控制：启动 / 停止 / 重启（按钮分开，milky 由用户手动触发）──
   router.get('/api/milky/status', async ctx => json(ctx.res, 200, await milkyCtl.status()))
+  // 只开一个：milky 仅当它是当前协议端才可控制（切到 napcat 时拒绝拉起/停止，防止双开）
+  const milkyGate = (ctx: Ctx): boolean => {
+    if (config.channel !== 'milky') {
+      json(ctx.res, 400, { ok: false, error: '当前协议端是 NapCat；切到 Milky 后才能控制 milky' })
+      return false
+    }
+    return true
+  }
   router.post('/api/milky/start', async ctx => {
+    if (!milkyGate(ctx)) return
     milkyCtl.start()
     json(ctx.res, 200, { ok: true })
   })
   router.post('/api/milky/stop', async ctx => {
+    if (!milkyGate(ctx)) return
     milkyCtl.stop()
     json(ctx.res, 200, { ok: true })
   })
   router.post('/api/milky/restart', async ctx => {
+    if (!milkyGate(ctx)) return
     await milkyCtl.restart()
     json(ctx.res, 200, { ok: true })
   })
