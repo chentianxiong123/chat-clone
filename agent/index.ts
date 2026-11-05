@@ -6,6 +6,7 @@ import { createKernel } from './v2/kernel.js'
 import { QQAdapter } from './v2/channels/qq.js'
 import { NapCatTransport } from './v2/channels/napcat.js'
 import { MilkyTransport } from './v2/channels/milky.js'
+import { milkyCtl } from './milky-ctl.js'
 import type { BotTransport } from './v2/channels/transport.js'
 
 const core = new AgentCore()
@@ -13,6 +14,9 @@ const v2 = createKernel()
 
 // ── WebUI（先起，便于连不上协议端时也能进控制台）──
 startWebUI(core, v2)
+
+// ── 触发协议端：Milky 没跑就自动拉起（日志吃二维码由 /milky 页面展示）──
+milkyCtl.autoEnsure()
 
 // ── 协议端插头：按 config.channel 自由切换（napcat | milky），核心零改动 ──
 let transport: BotTransport

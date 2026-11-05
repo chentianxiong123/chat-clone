@@ -14,6 +14,7 @@ import { paths } from './paths.js'
 import { json, readBody } from './transport/http/http.js'
 import { Router } from './transport/http/router.js'
 import { registerModelsRoutes } from './transport/http/routes/models.js'
+import { milkyCtl, MILKY_HTML } from './milky-ctl.js'
 
 const WEB_DIR = paths.web
 const ENV_PATH = paths.env
@@ -116,6 +117,17 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 
   const router = new Router()
   registerModelsRoutes(router)
+
+  // ── Milky 控制台：触发协议端 + 吃二维码 ──
+  router.get('/api/milky/status', async ctx => json(ctx.res, 200, await milkyCtl.status()))
+  router.post('/api/milky/restart', async ctx => {
+    await milkyCtl.restart()
+    json(ctx.res, 200, { ok: true })
+  })
+  router.get('/milky', ctx => {
+    ctx.res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    ctx.res.end(MILKY_HTML)
+  })
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
