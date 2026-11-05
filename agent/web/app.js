@@ -20,6 +20,7 @@ let ragMeta = null
 
 // ── 导航（AstrBot 式左侧栏）──
 document.querySelectorAll('.side-item').forEach((btn) => {
+  if (btn.dataset.external) return // 外部跳转按钮（如 /milky 控制台），不走 data-page 切换
   btn.addEventListener('click', () => {
     document.querySelectorAll('.side-item').forEach((b) => b.classList.remove('active'))
     document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'))
@@ -34,7 +35,41 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     if (page === 'models') loadModels()
     if (page === 'config') { loadConfig(); loadServiceConfig() }
     if (page === 'overview') void loadThreadOverview()
+    if (page === 'milky') connectMilky(); else disconnectMilky()
   })
+})
+
+// ── Milky 协议端面板（事件驱动 SSE 推送，零轮询）──
+let milkyEs = null
+function renderMilky(s) {
+  const run = s.running, login = s.loggedIn
+  $('milky-run').textContent = run ? (s.state === 'running' ? '运行中' : '…') : (s.state === 'crashed' ? '已崩溃' : '未运行')
+  $('milky-login').textContent = login ? '已登录' : '未登录'
+  $('milky-pid').textContent = s.pid ? String(s.pid) : '—'
+  $('milky-qrstate').textContent = login ? '已登录' : (s.qrDataUrl ? '可扫码' : (run ? '等待出码' : '未运行'))
+  const qr = $('milky-qr')
+  if (login) {
+    qr.innerHTML = '<div class="text-xs text-emerald-400">已登录，无需扫码</div>'
+  } else if (s.qrDataUrl) {
+    qr.innerHTML = '<img src="' + s.qrDataUrl + '" style="width:240px;height:240px;image-rendering:pixelated;border-radius:8px;background:#fff;padding:6px">' +
+      '<div class="text-xs text-slate-500">手机 QQ 扫码（勾「下次登录无需确认」）</div>'
+  } else {
+    qr.innerHTML = '<div class="text-xs text-slate-500">' + (run ? '等待 Milky 输出二维码…' : 'Milky 未运行，点「拉起 / 重启」') + '</div>'
+  }
+}
+function connectMilky() {
+  if (milkyEs) return
+  fetch('/api/milky/status').then(r => r.json()).then(renderMilky).catch(() => {})
+  milkyEs = new EventSource('/api/milky/stream')
+  milkyEs.onmessage = e => { try { renderMilky(JSON.parse(e.data)) } catch {} }
+}
+function disconnectMilky() {
+  if (milkyEs) { milkyEs.close(); milkyEs = null }
+}
+document.getElementById('milky-restart')?.addEventListener('click', async () => {
+  const b = $('milky-restart'); b.disabled = true
+  try { await fetch('/api/milky/restart', { method: 'POST' }) } catch {}
+  setTimeout(() => { b.disabled = false }, 1500)
 })
 
 // ── SSE 状态流 ──

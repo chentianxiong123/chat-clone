@@ -284,6 +284,19 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         return json(res, 200, { events: v2.getEvents(thread, limit) })
       }
 
+      // ── Milky 事件流（SSE 推送状态变化，零轮询）──
+      if (path === '/api/milky/stream') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        })
+        res.write(`data: ${JSON.stringify(await milkyCtl.status())}\n\n`)
+        const unsub = milkyCtl.subscribe(s => { res.write(`data: ${JSON.stringify(s)}\n\n`) })
+        req.on('close', () => { unsub() })
+        return
+      }
+
       // ── SSE 状态流 ──
       if (path === '/api/stream') {
         res.writeHead(200, {

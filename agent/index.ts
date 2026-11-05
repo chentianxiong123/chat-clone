@@ -15,13 +15,16 @@ const v2 = createKernel()
 // ── WebUI（先起，便于连不上协议端时也能进控制台）──
 startWebUI(core, v2)
 
-// ── 触发协议端：Milky 没跑就自动拉起（日志吃二维码由 /milky 页面展示）──
-milkyCtl.autoEnsure()
+// ── 触发协议端：milky 由 agent spawn（全控制），fs.watch 事件驱动状态；崩了等用户手动拉起 ──
+milkyCtl.init()
+milkyCtl.start()
 
 // ── 协议端插头：按 config.channel 自由切换（napcat | milky），核心零改动 ──
 let transport: BotTransport
 if (config.channel === 'milky') {
   transport = new MilkyTransport({ host: config.milky.host, port: config.milky.port, token: config.milky.token })
+  // 登录成功（.ks 写入，fs.watch 事件）→ milky 3000 起来 → 重连消息通道（事件驱动，非轮询）
+  milkyCtl.onLogin(() => transport.reconnect())
 } else {
   const bot = new NCWebsocket({
     protocol: config.napcat.protocol,

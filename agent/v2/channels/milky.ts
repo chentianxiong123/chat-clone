@@ -42,17 +42,48 @@ export class MilkyTransport implements BotTransport {
     return this.opt.token ? `${base}?access_token=${encodeURIComponent(this.opt.token)}` : base
   }
 
-  async connect(): Promise<void> {
-    const ws = new WebSocket(this.wsUrl)
-    this.ws = ws
-    ws.on('open', () => this.statusCb?.(true))
-    ws.on('close', () => this.statusCb?.(false))
-    ws.on('error', () => this.statusCb?.(false))
-    ws.on('message', raw => this.onMessage(raw.toString()))
-    await new Promise<void>((resolve, reject) => {
-      ws.once('open', () => resolve())
-      ws.once('error', err => reject(err))
+  private stopped = false
+  private everConnected = false
+  private retryTimer: NodeJS.Timeout | null = null
+
+  /**
+   * 单次连接。首次失败（milky 3000 登录成功前未监听）不重试——等 .ks 登录事件调 reconnect()；
+   * 曾连上后断开（掉线）才重连（WS 断线重连是事件驱动，非状态轮询）。
+   */
+  private connectOnce(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(this.wsUrl)
+      this.ws = ws
+      ws.on('open', () => { this.everConnected = true; this.statusCb?.(true); resolve() })
+      ws.on('error', err => { this.statusCb?.(false); if (this.everConnected) this.scheduleRetry(); reject(err) })
+      ws.on('close', () => { this.statusCb?.(false); if (this.everConnected) this.scheduleRetry() })
+      ws.on('message', raw => this.onMessage(raw.toString()))
     })
+  }
+
+  private scheduleRetry(): void {
+    if (this.stopped) return
+    if (this.retryTimer) return
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      if (!this.stopped) void this.connectOnce().catch(() => { /* error 已调度 */ })
+    }, 3000)
+  }
+
+  /** 登录成功（.ks 事件）→ milky 3000 已起，主动连上（事件驱动） */
+  reconnect(): void {
+    this.ws?.close()
+    void this.connectOnce().catch(() => { /* 仍连不上时靠 .ks/close 事件再触发 */ })
+  }
+
+  stop(): void {
+    this.stopped = true
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.ws?.close()
+  }
+
+  async connect(): Promise<void> {
+    await this.connectOnce()
   }
 
   private onMessage(raw: string): void {
