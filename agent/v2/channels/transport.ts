@@ -31,4 +31,6 @@ export interface BotTransport {
   onPrivate(cb: (e: PrivateMsg) => void): void
   /** 注册连接状态回调 */
   onStatus(cb: (connected: boolean) => void): void
+  /** 手动重连（面板按钮；事件驱动，非轮询） */
+  reconnect?(): void | Promise<void>
 }

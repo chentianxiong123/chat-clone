@@ -35,42 +35,91 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     if (page === 'models') loadModels()
     if (page === 'config') { loadConfig(); loadServiceConfig() }
     if (page === 'overview') void loadThreadOverview()
-    if (page === 'milky') connectMilky(); else disconnectMilky()
+    if (page === 'milky' || page === 'napcat') connectProto(); else disconnectProto()
   })
 })
 
-// ── Milky 协议端面板（事件驱动 SSE 推送，零轮询）──
+// ── 协议端面板（Milky + NapCat，事件驱动 SSE 推送，零轮询）──
 let milkyEs = null
+let protoInfo = null // /api/protocol/status 缓存（channel + napcat 地址 + connected）
+const protoName = (ch) => (ch === 'milky' ? 'Milky' : 'NapCat')
+
 function renderMilky(s) {
   const run = s.running, login = s.loggedIn
-  $('milky-run').textContent = run ? (s.state === 'running' ? '运行中' : '…') : (s.state === 'crashed' ? '已崩溃' : '未运行')
+  // 状态机：idle → 启动 → running →（扫码→已登录）→ 崩了 → crashed（手动启动）
+  const st = s.state === 'running' ? (login ? '已登录' : '运行中（等扫码）') : s.state === 'crashed' ? '崩溃（手动启动）' : '未启动'
+  $('milky-state').textContent = st
+  $('milky-run').textContent = run ? '运行中' : (s.state === 'crashed' ? '已崩溃' : '未运行')
   $('milky-login').textContent = login ? '已登录' : '未登录'
   $('milky-pid').textContent = s.pid ? String(s.pid) : '—'
-  $('milky-qrstate').textContent = login ? '已登录' : (s.qrDataUrl ? '可扫码' : (run ? '等待出码' : '未运行'))
+  $('milky-qrstate').textContent = login ? '已登录' : (s.qrDataUrl ? (s.qrExpired ? '已过期（点重启）' : '可扫码') : (run ? '等待出码' : '未运行'))
   const qr = $('milky-qr')
   if (login) {
     qr.innerHTML = '<div class="text-xs text-emerald-400">已登录，无需扫码</div>'
-  } else if (s.qrDataUrl) {
+  } else if (s.qrDataUrl && !s.qrExpired && s.running) {
     qr.innerHTML = '<img src="' + s.qrDataUrl + '" style="width:240px;height:240px;image-rendering:pixelated;border-radius:8px;background:#fff;padding:6px">' +
       '<div class="text-xs text-slate-500">手机 QQ 扫码（勾「下次登录无需确认」）</div>'
   } else {
-    qr.innerHTML = '<div class="text-xs text-slate-500">' + (run ? '等待 Milky 输出二维码…' : 'Milky 未运行，点「拉起 / 重启」') + '</div>'
+    qr.innerHTML = '<div class="text-xs text-slate-500">' + (run ? (s.qrExpired ? '二维码已过期，点「重启」出新码' : '等待 Milky 输出二维码…') : '未运行——点「启动」拉起，它是你的子进程') + '</div>'
+  }
+  // 按钮分开：未运行→启动；运行→重启/停止
+  $('milky-start').hidden = run
+  $('milky-restart').hidden = !run
+  $('milky-stop').hidden = !run
+  // 协议端当前选择
+  if (protoInfo) {
+    const active = protoInfo.channel === 'milky'
+    $('proto-milky').hidden = active
+    $('proto-milky-badge').hidden = !active
+    if (active) $('proto-milky-badge').textContent = '当前协议端 ✓'
   }
 }
-function connectMilky() {
-  if (milkyEs) return
-  fetch('/api/milky/status').then(r => r.json()).then(renderMilky).catch(() => {})
-  milkyEs = new EventSource('/api/milky/stream')
-  milkyEs.onmessage = e => { try { renderMilky(JSON.parse(e.data)) } catch {} }
+
+function renderNapcat() {
+  if (!protoInfo) return
+  const p = protoInfo
+  $('napcat-conn').textContent = p.connected ? '已连接' : '未连接'
+  $('napcat-addr').textContent = p.napcat.host + ':' + p.napcat.port
+  $('napcat-protocol').textContent = p.napcat.protocol
+  $('napcat-current').textContent = protoName(p.channel) + (p.channel === 'napcat' ? ' ✓' : '')
+  const active = p.channel === 'napcat'
+  $('proto-napcat').hidden = active
+  $('proto-napcat-badge').hidden = !active
+  if (active) $('proto-napcat-badge').textContent = '当前协议端 ✓'
 }
-function disconnectMilky() {
+
+function connectProto() {
+  fetch('/api/protocol/status').then(r => r.json()).then(p => {
+    protoInfo = p
+    renderMilky(p.milky)
+    renderNapcat()
+  }).catch(() => {})
+  if (!milkyEs) {
+    milkyEs = new EventSource('/api/milky/stream')
+    milkyEs.onmessage = e => { try { renderMilky(JSON.parse(e.data)) } catch {} }
+  }
+}
+function disconnectProto() {
   if (milkyEs) { milkyEs.close(); milkyEs = null }
 }
-document.getElementById('milky-restart')?.addEventListener('click', async () => {
-  const b = $('milky-restart'); b.disabled = true
-  try { await fetch('/api/milky/restart', { method: 'POST' }) } catch {}
-  setTimeout(() => { b.disabled = false }, 1500)
-})
+
+// 按钮分开：启动 / 重启 / 停止（milky 是用户手动控制的子进程）
+const protoPost = async (url) => { try { await fetch(url, { method: 'POST' }) } catch {} }
+document.getElementById('milky-start')?.addEventListener('click', () => { void protoPost('/api/milky/start') })
+document.getElementById('milky-restart')?.addEventListener('click', () => { void protoPost('/api/milky/restart') })
+document.getElementById('milky-stop')?.addEventListener('click', () => { void protoPost('/api/milky/stop') })
+document.getElementById('napcat-reconnect')?.addEventListener('click', () => { void protoPost('/api/protocol/reconnect') })
+
+// 切换协议端（写 .env + agent 重启生效）
+const switchProto = async (ch) => {
+  if (!confirm('切到 ' + protoName(ch) + '？agent 将重启（milky 不会自动拉起，需手动点启动）')) return
+  try {
+    await fetch('/api/protocol/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: ch }) })
+    setTimeout(() => location.reload(), 2000)
+  } catch {}
+}
+document.getElementById('proto-milky')?.addEventListener('click', () => { void switchProto('milky') })
+document.getElementById('proto-napcat')?.addEventListener('click', () => { void switchProto('napcat') })
 
 // ── SSE 状态流 ──
 const evtSource = new EventSource('/api/stream')
@@ -96,7 +145,8 @@ function greeting() {
 function renderState(snap) {
   currentSnap = snap
   $('conn-dot').className = 'pulse-dot ' + (snap.connected ? 'live' : 'dead')
-  $('conn-text').textContent = snap.connected ? 'NapCat 已连接' : 'NapCat 未连接'
+  $('conn-text').textContent = snap.connected ? (protoInfo && protoInfo.channel === 'milky' ? 'Milky 已连接' : 'NapCat 已连接') : '协议端未连接'
+  if (protoInfo) { protoInfo.connected = snap.connected; renderNapcat() }
 
   $('greet').textContent = greeting()[0]
   $('hero-emoji').textContent = greeting()[1]

@@ -184,6 +184,11 @@ class MilkyCtl {
   status(): Promise<MilkyStatus> {
     return Promise.resolve(this.snapshot())
   }
+
+  /** 是否已登录过（.ks 存在）。有登录态 agent 启动自动拉起恢复在线；无登录态等用户手动触发，不白挂进程 */
+  hasLogin(): boolean {
+    return this.loggedIn
+  }
 }
 
 export const milkyCtl = new MilkyCtl()

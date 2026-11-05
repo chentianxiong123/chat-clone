@@ -15,6 +15,11 @@ import { json, readBody } from './transport/http/http.js'
 import { Router } from './transport/http/router.js'
 import { registerModelsRoutes } from './transport/http/routes/models.js'
 import { milkyCtl, MILKY_HTML } from './milky-ctl.js'
+import type { BotTransport } from './v2/channels/transport.js'
+
+// ── 当前协议端插头（index.ts 创建后 bind，面板「重连」用）──
+let activeTransport: BotTransport | null = null
+export function bindTransport(t: BotTransport | null): void { activeTransport = t }
 
 const WEB_DIR = paths.web
 const ENV_PATH = paths.env
@@ -118,8 +123,16 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
   const router = new Router()
   registerModelsRoutes(router)
 
-  // ── Milky 控制台：触发协议端 + 吃二维码 ──
+  // ── Milky 控制：启动 / 停止 / 重启（按钮分开，milky 由用户手动触发）──
   router.get('/api/milky/status', async ctx => json(ctx.res, 200, await milkyCtl.status()))
+  router.post('/api/milky/start', async ctx => {
+    milkyCtl.start()
+    json(ctx.res, 200, { ok: true })
+  })
+  router.post('/api/milky/stop', async ctx => {
+    milkyCtl.stop()
+    json(ctx.res, 200, { ok: true })
+  })
   router.post('/api/milky/restart', async ctx => {
     await milkyCtl.restart()
     json(ctx.res, 200, { ok: true })
@@ -127,6 +140,34 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
   router.get('/milky', ctx => {
     ctx.res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     ctx.res.end(MILKY_HTML)
+  })
+
+  // ── 协议端面板：状态（channel + 连接 + napcat 配置 + milky）──
+  router.get('/api/protocol/status', async ctx => {
+    const snap = core.getSnapshot()
+    json(ctx.res, 200, {
+      channel: config.channel,
+      connected: snap.connected,
+      napcat: { host: config.napcat.host, port: config.napcat.port, protocol: config.napcat.protocol },
+      milky: await milkyCtl.status(),
+    })
+  })
+
+  // ── 手动重连当前协议端（事件驱动，非轮询）──
+  router.post('/api/protocol/reconnect', async ctx => {
+    if (activeTransport?.reconnect) await activeTransport.reconnect()
+    json(ctx.res, 200, { ok: true })
+  })
+
+  // ── 切换协议端（写 .env AGENT_CHANNEL，agent 重启生效；milky 由用户手动拉起，绝不自动）──
+  router.post('/api/protocol/channel', async ctx => {
+    const body = (await readBody(ctx.req)) as { channel?: string }
+    const ch = body?.channel
+    if (ch !== 'napcat' && ch !== 'milky') return json(ctx.res, 400, { ok: false, error: 'channel 必须是 napcat | milky' })
+    const raw = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : ''
+    writeEnvWithBackup(applyEnvPatch(raw, { AGENT_CHANNEL: ch }))
+    json(ctx.res, 200, { ok: true, note: `已切换 ${ch}，agent 重启后生效` })
+    setTimeout(() => process.kill(process.pid, 'SIGTERM'), 600)
   })
 
   const server = createServer(async (req, res) => {

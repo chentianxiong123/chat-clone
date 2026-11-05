@@ -43,6 +43,11 @@ export class NapCatTransport implements BotTransport {
     await this.bot.connect()
   }
 
+  /** 手动重连（node-napcat-ts 自带） */
+  async reconnect(): Promise<void> {
+    await this.bot.reconnect()
+  }
+
   async sendGroup(groupId: number, text: string): Promise<void> {
     await this.bot.send_group_msg({ group_id: groupId, message: [{ type: 'text', data: { text } }] })
   }

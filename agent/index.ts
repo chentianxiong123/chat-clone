@@ -1,7 +1,7 @@
 import { NCWebsocket } from 'node-napcat-ts'
 import { config } from './config.js'
 import { AgentCore } from './core.js'
-import { startWebUI } from './webui.js'
+import { startWebUI, bindTransport } from './webui.js'
 import { createKernel } from './v2/kernel.js'
 import { QQAdapter } from './v2/channels/qq.js'
 import { NapCatTransport } from './v2/channels/napcat.js'
@@ -17,7 +17,6 @@ startWebUI(core, v2)
 
 // ── 触发协议端：milky 由 agent spawn（全控制），fs.watch 事件驱动状态；崩了等用户手动拉起 ──
 milkyCtl.init()
-milkyCtl.start()
 
 // ── 协议端插头：按 config.channel 自由切换（napcat | milky），核心零改动 ──
 let transport: BotTransport
@@ -25,6 +24,15 @@ if (config.channel === 'milky') {
   transport = new MilkyTransport({ host: config.milky.host, port: config.milky.port, token: config.milky.token })
   // 登录成功（.ks 写入，fs.watch 事件）→ milky 3000 起来 → 重连消息通道（事件驱动，非轮询）
   milkyCtl.onLogin(() => transport.reconnect())
+  // 有登录态但用户手动点「拉起」→ milky 自动登录恢复 → 3000 起 → 延迟重连一次（单次定时非轮询，milky 由用户子进程控制）
+  if (milkyCtl.hasLogin()) {
+    const un = milkyCtl.subscribe(s => {
+      if (s.running && s.loggedIn) {
+        un()
+        setTimeout(() => transport.reconnect(), 3000)
+      }
+    })
+  }
 } else {
   const bot = new NCWebsocket({
     protocol: config.napcat.protocol,
@@ -38,6 +46,8 @@ if (config.channel === 'milky') {
   v2.attachQQ(new QQAdapter(bot))
   transport = nap
 }
+// 面板「重连」需要操作当前插头
+bindTransport(transport)
 const channelName = config.channel === 'milky' ? 'Milky' : 'NapCat'
 
 try {
