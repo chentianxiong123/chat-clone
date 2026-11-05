@@ -73,7 +73,11 @@ export class MilkyTransport implements BotTransport {
   /** 登录成功（.ks 事件）→ milky 3000 已起，主动连上（事件驱动） */
   reconnect(): void {
     this.ws?.close()
-    void this.connectOnce().catch(() => { /* 仍连不上时靠 .ks/close 事件再触发 */ })
+    void this.connectOnce().catch(() => {
+      // 健壮性：登录成功瞬间 3000 可能未监听 → 1s 后单次重试（事件驱动，非轮询；仍失败等下次事件）
+      if (this.stopped) return
+      setTimeout(() => { if (!this.stopped) void this.connectOnce().catch(() => { /* error 已调度 */ }) }, 1000)
+    })
   }
 
   stop(): void {

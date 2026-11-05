@@ -1,5 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { watch, readFileSync, readdirSync, existsSync, openSync, type FSWatcher } from 'node:fs'
+import { watch, readFileSync, readdirSync, existsSync, openSync, unlinkSync, statSync, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 
 const MILKY_BIN = process.env.MILKY_BIN || '/opt/qqbot/Lagrange.Milky'
@@ -77,9 +77,18 @@ class MilkyCtl {
   init(): void {
     if (this.started) return
     this.started = true
+    // 健壮性：agent 是 milky 唯一控制者——杀掉 agent 重启前残留的旧 milky（孤儿），
+    // 清掉旧二维码残留（否则面板显示过期码误导）。清理 ≠ 拉起，用户手动才启动。
+    this.ensureNoOld()
+    this.clearStaleQr()
     this.refreshLoggedIn()
     this.readQr()
     this.watch()
+  }
+
+  /** 清残留二维码（milky 未运行时的旧码作废，避免面板误导） */
+  private clearStaleQr(): void {
+    try { unlinkSync(join(MILKY_DIR, 'qrcode.png')) } catch { /* 无残留 */ }
   }
 
   private refreshLoggedIn(): void {
@@ -109,14 +118,19 @@ class MilkyCtl {
       const kw = watch(MILKY_DIR, { persistent: false }, (_ev, fname) => {
         if (!fname) return
         if (fname === 'qrcode.png') {
-          this.readQr()
-          this.emit()
+          // 健壮性：milky 写 png 可能非原子，延迟 150ms 重读拿完整图（单次定时，非轮询）
+          setTimeout(() => { this.readQr(); this.emit() }, 150)
         } else if (fname.endsWith('.ks')) {
           const prev = this.loggedIn
           this.refreshLoggedIn()
           if (this.loggedIn && !prev) this.onLoginCb?.() // 登录成功 → 通知重连 3000
           this.emit()
         }
+      })
+      // 健壮性：目录被替换/重建导致 inotify 失效 → 移除旧 watcher 重建（事件驱动，非轮询；目录真不存在时同步抛→catch 停，不会死循环）
+      kw.on('error', () => {
+        this.watchers = this.watchers.filter(w => w !== kw)
+        this.watch()
       })
       this.watchers.push(kw)
     } catch {
@@ -144,7 +158,11 @@ class MilkyCtl {
     if (this.child && this.child.exitCode === null) return
     this.ensureNoOld()
     let logFd: number | null = null
-    try { logFd = openSync(MILKY_LOG, 'a') } catch { /* 日志不可写时忽略 */ }
+    try {
+      // 健壮性：崩溃多次重启日志无限增长 → 超 1MB 截断（每次启动只查一次，非轮询）
+      try { if (statSync(MILKY_LOG).size > 1024 * 1024) openSync(MILKY_LOG, 'w').close() } catch { /* 日志不存在/无权限 */ }
+      logFd = openSync(MILKY_LOG, 'a')
+    } catch { /* 日志不可写时忽略 */ }
     const child = spawn(MILKY_BIN, [], {
       cwd: MILKY_DIR,
       detached: true, // milky 独立进程组：agent 退出不影响 milky 运行；agent 重启 ensureNoOld 接管
