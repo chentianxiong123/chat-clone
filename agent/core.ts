@@ -1,6 +1,6 @@
 import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
-import { buildSystemPrompt } from './prompt.js'
+import { buildSystemPrompt, buildDemoDialog } from './prompt.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
 import { relevanceScore } from './dynamics.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
@@ -424,9 +424,12 @@ export class AgentCore {
         REPLY_TOOL,
         ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
       ]
+      // system 纯静态（缓存前缀稳定）；随机示例（动态）放消息尾部、历史之后——官方：静态前缀/动态尾部
+      const demoMsg = buildDemoDialog()
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(demoMsg ? [{ role: 'user', content: demoMsg } as ChatMessage] : []),
         userMsg,
       ]
       if (config.log.level === 'debug') {
@@ -542,9 +545,12 @@ export class AgentCore {
         REPLY_TOOL,
         ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
       ]
+      // system 纯静态（缓存前缀稳定）；随机示例（动态）放消息尾部、历史之后——官方：静态前缀/动态尾部
+      const demoMsg = buildDemoDialog()
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
+        ...(demoMsg ? [{ role: 'user', content: demoMsg } as ChatMessage] : []),
         userMsg,
       ]
       if (config.log.level === 'debug') {

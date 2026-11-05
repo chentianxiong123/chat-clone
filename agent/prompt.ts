@@ -21,19 +21,6 @@ export function buildSystemPrompt(scene?: SceneType): string {
     return ''
   }
 
-  // 风格样本：真实聊天记录（数据式人设）——AI 看"我们平时怎么聊"理解并模仿，
-  // 粗口/口语/长短句自然体现，不由提示词描述定义。把"本人:"换成 {name} 便于识别。
-  // 每次随机抽一组子集（不固定全量），多样性稀释单一口癖，也避免固定示例教坏。
-  if (config.persona.demoDialogs) {
-    const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
-    if (lines.length) {
-      const shuffled = [...lines].sort(() => Math.random() - 0.5)
-      const sample = shuffled.slice(0, Math.min(40, lines.length))
-      prompt += '\n\n【真实对话示例】（你和朋友平时真实的聊天，随机抽的，照这个味道来）\n' +
-        sample.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
-    }
-  }
-
   // 工具契约：工具是唯一行动方式（MUST use tools），精确名调用。
   // reply 一次可返回多条，每条就是一条消息——按工具格式分割，不靠程序切。
   prompt += `
@@ -51,4 +38,23 @@ export function buildSystemPrompt(scene?: SceneType): string {
 - 调 reply 发消息，1-3 条，每条很短；不解释、不给方案、不科普。
 - 表情只能从真实聊天出现过的（😅👴）里选；口癖（啊这/emm/离谱）偶尔有一句就行，别每条都带。`
   return prompt
+}
+
+/**
+ * 风格样本（数据式人设）：真实聊天记录，AI 看"我们平时怎么聊"理解并模仿。
+ * 关键：这是「动态内容」——每次随机抽子集（多样性，避免教坏/口癖单一），
+ * 因此必须作为独立消息放「消息数组尾部」（历史之后），绝不能进 system prompt
+ * （官方最佳实践：静态前缀/动态尾部；动态值进 system 会破坏前缀缓存命中）。
+ */
+export function buildDemoDialog(): string {
+  if (config.persona.demoDialogs) {
+    const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length) {
+      const shuffled = [...lines].sort(() => Math.random() - 0.5)
+      const sample = shuffled.slice(0, Math.min(40, lines.length))
+      return '\n\n【真实对话示例】（你和朋友平时真实的聊天，随机抽的，照这个味道来）\n' +
+        sample.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
+    }
+  }
+  return ''
 }
