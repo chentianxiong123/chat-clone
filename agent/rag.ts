@@ -79,9 +79,29 @@ const STOP_WORDS = new Set([
 // jieba 真词分词器（@node-rs/jieba + 默认词典；new Jieba() 是空词典，必须 withDict）
 const _jieba = Jieba.withDict(dict)
 
+// ── ②③ 相关性：bigram 提取（中文二元组 + 英文/数字词），用于"chunk 跟 query 相不相关"判断 ──
+const STOP_BIGRAMS = new Set([
+  '什么', '怎么', '为什', '这个', '那个', '一个', '没有', '还是', '不是', '可以',
+  '我们', '你们', '他们', '现在', '真的', '是不', '有没', '东西', '事情', '问题',
+  '时候', '今天', '明天', '昨天', '晚上', '白天',
+])
+/** 提取关键词 bigram（去停用词）：相关性判断用 */
+function bigrams(s: string): Set<string> {
+  const q = s.replace(/\s+/g, '')
+  const grams = new Set<string>()
+  for (let i = 0; i < q.length - 1; i++) {
+    const g = q.slice(i, i + 2)
+    if (/^[\u4e00-\u9fff]{2}$/.test(g) && !STOP_BIGRAMS.has(g)) grams.add(g)
+  }
+  for (const w of q.match(/[a-zA-Z0-9_]{2,}/g) || []) grams.add(w.toLowerCase())
+  return grams
+}
+
 function extractKeywords(text: string): string[] {
-  // 真词：jieba 分词（整词，非 2-gram），滤格式噪音/单字/纯数字标点/停用词
-  const words = _jieba.cut(text, false)
+  // 真词：jieba 分词，滤格式噪音/单字/纯数字标点/停用词。
+  // ④ 保复合词：用 cutForSearch（混合模式）——比 cut(false) 多切出"蓝屏/茶轴/机械键盘"这种复合词，
+  //   避免判别词被拆成单字后滤掉（cut 把"蓝屏"切"蓝/屏"，单字滤光，判别词就丢了）。
+  const words = _jieba.cutForSearch(text, false)
   const out: string[] = []
   for (const w of words) {
     const t = w.trim().toLowerCase()
@@ -157,8 +177,20 @@ function searchLike(query: string, topK: number): RagHit[] {
   const kws = extractKeywords(query)
   if (!kws.length) return []
   try {
+    // ④ 低频词加权：全表命中量 < likeLowFreqMax 的词是"低频判别词"（命中几条的专有名/罕见词，如蓝屏=5、茶轴=0），
+    //   权重 3.0；高频泛词（命中>200 条，如天天=3343、电脑=728）权重 0.5——让判别词主导 LIKE 召回，不被高频词淹没。
+    let weights: number[]
+    if (config.rag.likeLowFreqWeight) {
+      weights = kws.map(k => {
+        let cnt = 0
+        try { cnt = (db.prepare(`SELECT count(*) n FROM chunks WHERE text LIKE ?`).get(`%${k.replace(/'/g, "''")}%`) as { n: number }).n } catch { cnt = 0 }
+        return cnt < config.rag.likeLowFreqMax ? 3.0 : 0.5
+      })
+    } else {
+      weights = kws.map(() => 1)
+    }
     const likes = kws.map(k => `text LIKE '%${k.replace(/'/g, "''")}%'`)
-    const scores = kws.map(k => `(text LIKE '%${k.replace(/'/g, "''")}%')`)
+    const scores = kws.map((k, i) => `(text LIKE '%${k.replace(/'/g, "''")}%') * ${weights[i]}`)
     const rows = db.prepare(`
       SELECT chunk_id AS chunkId, date AS date, text AS text, (${scores.join(' + ')}) AS score
       FROM chunks
@@ -244,29 +276,62 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
     }
   }
   if (!picked.length) return ''
-  // 返回完整对话对（user=对方 + assistant=本人）：AI 看到"对方说→本人怎么接"的语境，
-  // 才能模仿接话节奏/语气/长度，而不是只拿一句干巴巴本人原话。
-  // 限 2~3 对（6 行）、总长 ≤ 600 字，防止 RAG 淹没主上下文。
+  // ── 召回质量提升：把"整段 chunk（user+assistant 混）"提炼成"贴题的本人短句" ──
+  // ① 只取本人（assistant）短句（assistantOnly），或 ①B 保留 ≤2 句最相关 user 作语境（keepUserContext）
+  // ② 相关性闸门（relevanceGate）：chunk 跟 query bigram 重合 < 阈值的不要（宁缺毋滥，防"蓝屏→日本"错召回）
+  // ③ 本人短句按相关度排序（rerankByRelevance）：最贴 query 的短句优先喂
+  const qGrams = bigrams(query)
+  const qBigrams = (s: string): Set<string> => bigrams(s)
+  const relevanceOf = (line: string): number => {
+    const g = qBigrams(line)
+    let hits = 0
+    for (const b of g) if (qGrams.has(b)) hits++
+    return hits
+  }
   const MAX_CHUNKS = 4
-  const MAX_PER_CHUNK = 6
   const MAX_TOTAL_CHARS = 600
-  const pairs = (text: string): string[] => text
-    .split('\n')
-    .filter(l => /^(user|assistant):/.test(l))
-    .map(l => l.trim())
-    .filter(Boolean)
-    .slice(0, MAX_PER_CHUNK)
+  // ② 相关性闸门：按"跟 query 的 bigram 重合"给 chunk 打分，< relevanceGate 的丢
+  const gate = config.rag.relevanceGate
+  const eligible = gate > 0
+    ? picked.filter(r => {
+        const hits = relevanceOf(r.text)
+        return hits >= gate
+      })
+    : picked
+  const pool = eligible.length ? eligible : picked // 闸门太严导致全丢时，退而不空手
+  // ③ 按 chunk 相关度降序（原 picked 已按 score 排，闸门后保持）；随机化从 top 池抽
+  const topPool = pool.slice(0, Math.max(pool.length, MAX_CHUNKS * 3, 12))
+  const sampled = config.rag.rerankByRelevance
+    ? topPool.slice(0, MAX_CHUNKS) // 相关度高的优先（不随机，保证最贴题的喂）
+    : [...topPool].sort(() => Math.random() - 0.5).slice(0, MAX_CHUNKS)
   let total = 0
   const lines: string[] = []
-  // 随机化：从高分池随机抽，避免每次都召回同一批原句（防机械复读；多样性靠语料池）
-  const pool = picked.slice(0, Math.max(MAX_CHUNKS * 3, 12))
-  const sampled = [...pool].sort(() => Math.random() - 0.5).slice(0, MAX_CHUNKS)
   for (const r of sampled) {
-    const pairLines = pairs(r.text)
-    if (!pairLines.length) continue
-    // 带日期标注：这些是"多年前"的记录，不是现在在聊的（防旧记忆当现状）
+    const allLines = r.text.split('\n').filter(l => /^(user|assistant):/.test(l)).map(l => l.trim()).filter(Boolean)
+    // ① 本人短句化：只保留 assistant 行（本人真实反应，味道最纯）
+    let asstLines: string[]
+    let userCtx: string[] = []
+    if (config.rag.assistantOnly) {
+      asstLines = allLines.filter(l => l.startsWith('assistant:')).map(l => l.replace(/^assistant:\s*/, '').trim())
+      // ①B 可选：保留 ≤2 句最相关 user 作语境（模型知道"遇到啥情况→这么回"）
+      if (config.rag.keepUserContext) {
+        const userLines = allLines.filter(l => l.startsWith('user:')).map(l => l.replace(/^user:\s*/, '').trim())
+        userCtx = userLines.sort((a, b) => relevanceOf(b) - relevanceOf(a)).slice(0, 2).map(t => `对方：${t}`)
+      }
+    } else {
+      // 未开 assistantOnly：保持原"完整对话对"（user+assistant）
+      asstLines = allLines.map(l => l).slice(0, 6)
+    }
+    if (config.rag.assistantOnly) {
+      // ③ 本人短句按相关度排序（最贴 query 的优先）
+      asstLines = asstLines.filter(t => t).sort((a, b) => relevanceOf(b) - relevanceOf(a))
+    }
+    const chosen = config.rag.assistantOnly
+      ? [...userCtx, ...asstLines.slice(0, 4)] // 语境（若开）+ 本人短句 top4
+      : asstLines
+    if (!chosen.length) continue
     if (r.date) lines.push(`（记录于 ${r.date}）`)
-    for (const line of pairLines) {
+    for (const line of chosen) {
       if (total + line.length > MAX_TOTAL_CHARS) break
       lines.push(line)
       total += line.length

@@ -116,6 +116,19 @@ export const config = {
     // 注：qwen3-embedding-0.6b 余弦分整体偏低，语义相关召回约 0.13~0.27，
     // 明显无关约 <0.10；阈值取 0.10 能保住相关召回、只挡明显无关。
     vecMinScore: clamp01(envNum('RAG_VEC_MIN_SCORE', 0.10)),
+    // ── 召回质量开关（提升喂给模型的片段质量，A/B 可切）─────────────────
+    // ① 只取本人（assistant）短句，丢 user 噪音：模型只看"本人当年怎么说"，不被杂聊带偏
+    assistantOnly: process.env.RAG_ASSISTANT_ONLY !== 'false',
+    // ①B 精简 user 语境：每个 chunk 保留最相关的 ≤2 句 user 作语境（false=完全丢 user，最纯）
+    keepUserContext: process.env.RAG_KEEP_USER_CONTEXT === 'true',
+    // ② 相关性闸门：chunk 跟 query 关键词重合度（bigram 命中数）低于此值的不要（宁缺毋滥）
+    relevanceGate: Math.max(0, Math.round(envNum('RAG_RELEVANCE_GATE', 2))),
+    // ③ 本人短句按相关度排序（true=最贴 query 的短句优先喂；false=保持原顺序/随机）
+    rerankByRelevance: process.env.RAG_RERANK_BY_RELEVANCE !== 'false',
+    // ④ like 低频词加权：全表命中量 < 此阈值的词权重更高（低频判别词优先，高频泛词降权）
+    likeLowFreqWeight: process.env.RAG_LIKE_LOW_FREQ_WEIGHT !== 'false',
+    // ④ like 低频阈值：全表命中量低于此值算"低频判别词"
+    likeLowFreqMax: Math.max(1, Math.round(envNum('RAG_LIKE_LOW_FREQ_MAX', 200))),
     // 召回方式（非严肃场景，简单多样即可，可配置）：
     //   all    = 三路一起召回（vec+fts+like 合并去重，每次内容最全）
     //   random = 偶尔随机换召回方式（每次随机挑一路非空，增加多样性）

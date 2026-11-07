@@ -98,23 +98,28 @@ pi-tools.ts 的 search 硬闸门 + `MAX_SEARCHES=8` 防死循环：**搜到相�
 
 这符合用户决策："搜不到就凭印象回，不一定完全一致，别死搜"。
 
-## 六、可能的修复方向（未做，留待决策）
+## 六、修复方案（已落地，A/B 验证过）
 
-| 方向 | 改法 | 代价 |
-|---|---|---|
-| jieba 用混合模式 | `Jieba.cut(text, false)` 改 `cutForSearch` 或加自定义词典，保住"蓝屏/茶轴"复合词 | 中，要配词典 |
-| like 去 RANDOM | `ORDER BY score DESC, RANDOM()` 改 `ORDER BY score DESC, chunk_id`（确定性） | 低，但同分召回还是噪音 |
-| like 加权低频词 | score 里低频词（命中<100 条）权重调高，高频词（>1000）降权 | 中 |
-| 接受现状 | 有向量就够，没向量凭印象回兜底 | 0 |
+用户要求"提升召回质量"，逐个实现并 A/B 验证了 4 个改进（`agent/rag.ts` + `agent/config.ts`，env 可切）：
 
-**当前选择**：接受现状（有向量时 RAG 行；没向量时凭印象回兜底）。
+| # | 改进 | 改法 | 效果（A/B 实测） |
+|---|---|---|---|
+| ① | **本人短句化** | `assistantOnly`（默认开）：裁剪只取 assistant 行，丢 user 噪音 | "天天加班"改前 user 噪音一大坨（孔乙己包裹/送外卖）→ 改后"我不想加班/加班毫无意义/累死了"纯本人反应 |
+| ② | **相关性闸门** | `relevanceGate`（默认 2）：chunk 跟 query bigram 重合 <2 的不要（宁缺毋滥） | "电脑蓝屏"改前错召回"光速学会springboot/日本"→ 改后挡掉，留"我电脑怎么蓝屏了/电脑现在黑屏了"相关片段 |
+| ③ | **按相关度排序** | `rerankByRelevance`（默认开）：本人短句按"跟 query bigram 重合"排序，最贴题的优先喂 | 最相关的短句浮到最前，不被随机淹没 |
+| ④ | **like 低频词加权** | `likeLowFreqWeight`（默认开）+ `likeLowFreqMax=200`：全表命中<200 条的词权重 3.0，高频词 0.5；jieba 改 `cutForSearch` 保"蓝屏/茶轴"复合词 | 没向量时 like 召回略好（"机械键盘"→"还在用机械/键盘按起来不对劲"），但库里没语料的话题（茶轴 0 条）仍召不回 |
+
+**关键洞察**：召回质量最大的杠杆是 ①"只取本人短句"——chunk 里 user 行是噪音，assistant 行才是"本人的味道"。数据证明"天天加班"top1 chunk 里"我不想加班/加班毫无意义"是金矿，但被 user 杂聊稀释了，① 直接解决。
+
+**残留限制**：库里没语料的话题（茶轴 0 条/周末安排 0 条）再好的排序也召不回，靠 `MAX_SEARCHES` 凭印象回兜底。
 
 ## 七、验证脚本（可复现）
 
-`agent/like-check.mjs` + `agent/check-rag.mjs`（临时校验脚本，已留在 agent/ 目录）：
+`agent/ab-rag.mjs` + `agent/check-rag.mjs`（A/B 校验脚本，留在 agent/ 目录）：
 
 ```bash
 cd agent
 node --env-file=.env --import tsx check-rag.mjs   # ragStatus + 6 query 三路命中
-node --env-file=.env --import tsx like-check.mjs  # like 路硬搜（jieba 抽词 + 全表命中量）
+node --env-file=.env --import tsx ab-rag.mjs      # 改后 searchRag 实际喂模型的片段（默认全开）
+# 切开关 A/B：RAG_ASSISTANT_ONLY=false / RAG_KEEP_USER_CONTEXT=true / RAG_RELEVANCE_GATE=0 / RAG_LIKE_LOW_FREQ_WEIGHT=false
 ```
