@@ -13,7 +13,7 @@
  */
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { config } from './config.js'
-import { searchMemoryNote, createMemoryExecutors } from './tools.js'
+import { searchMemoryNote, searchMemoryNoteBatch, createMemoryExecutors } from './tools.js'
 
 /** 把 ToolSpec 风格参数 + execute 组装成 pi AgentTool */
 function makeTool(
@@ -79,15 +79,25 @@ function gateRelevant(gate: SearchGate): boolean {
 export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: SearchGate): AgentTool<object>[] {
   const mem = createMemoryExecutors(sceneKey)
 
-  const searchPastMemory: AgentTool<{ query: string; method?: string }> = makeTool(
+  const searchPastMemory: AgentTool<{ queries?: string[]; query?: string; method?: string }> = makeTool(
     'search_past_memory',
     '查本人和朋友**多年前**真实聊过的话、用过的说法/口癖/梗（历史聊天知识库）。' +
-      '**回复前必须先搜**：拿到话题就搜，搜到不相关就换更贴话题的关键词再搜，反复搜直到翻到跟现在话题相近的旧记录。' +
+      '**回复前必须先搜**：拿到话题就搜，一次搜尽量多给几个贴当前话题的关键词（批量，别反复单搜），翻到相近旧记录才开口。' +
       '查到的是多年旧记录，只用来学说话语气、回忆旧事，别照抄、别当成现在在聊的话。',
     {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '要回忆的关键词，**贴当前话题**，例如对方说"加班"就搜"加班/累/休息/打胶"' },
+        queries: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 6,
+          description: '要回忆的关键词列表（**批量**，一次给 2~5 个贴当前话题的词）。例如对方说"加班累死了"就传 ["加班","累死了","休息","打胶"]。每个词各召回一段，合并去重后一次给够上下文。',
+        },
+        query: {
+          type: 'string',
+          description: '（兼容单值）只搜一个词时用；优先用 queries 批量。',
+        },
         method: {
           type: 'string',
           enum: ['auto', 'all', 'random', 'vec', 'fts', 'like'],
@@ -96,10 +106,14 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
             'vec/fts/like=指定某一路；auto=默认（向量优先+回退）。不填用系统配置。',
         },
       },
-      required: ['query'],
     },
     async (_id, params) => {
-      const q = (params?.query ?? '').trim()
+      // 批量 queries[] 优先；兼容单 query
+      const qs = [
+        ...(Array.isArray(params?.queries) ? params.queries : []),
+        ...(params?.query ? [params.query] : []),
+      ].map(s => String(s ?? '').trim()).filter(Boolean)
+      const q = qs[0] ?? ''
       if (!q) return { content: [{ type: 'text', text: '（没想起来）' }], details: {} }
       // 防死循环：search 超过上限就短路，提示凭印象回（不死搜）
       if (gate.searchCount >= MAX_SEARCHES) {
@@ -112,13 +126,13 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
         }
       }
       const method = (params?.method ?? '').trim()
-      const note = await searchMemoryNote(sceneKey, q, method || undefined)
+      const note = await searchMemoryNoteBatch(sceneKey, qs, method || undefined)
       gate.searchCount++
       // 只有搜到实际旧记录才记进闸门（"没想起来"不算搜到相关）
       if (note && note !== '（没想起来）') gate.searchLog.push(note)
       const hint = note
         ? note + '\n【已翻到跟话题相关的旧记录，可以照着味道回。没相关的话换个关键词再搜；实在翻不到就近凭印象回。】'
-        : '（没想起来：这次没搜到贴话题的旧记录。换个更贴当前话题的关键词再 search 一次；搜到上限还没翻到就凭印象回一句，别死搜）'
+        : `（没想起来：这次 ${qs.length} 个关键词都没搜到贴话题的旧记录。换更贴当前话题的关键词再 search 一次；搜到上限还没翻到就凭印象回一句，别死搜）`
       return { content: [{ type: 'text', text: hint }], details: {} }
     },
   )

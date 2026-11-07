@@ -342,6 +342,30 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
   return lines.join('\n')
 }
 
+/**
+ * 批量召回：LLM 一次给多个关键词（queries[]），每个词各调 searchRag，结果 union 拼接。
+ * 减少 ReAct 往返——不用反复"搜一个词→没翻到→换词再搜"，一次给够上下文。
+ * 去重：同一段召回文本（同 chunk 被多词命中）只出现一次。总长仍限 MAX_TOTAL_CHARS 量级。
+ */
+export async function searchRagBatch(queries: string[], modeOverride?: string): Promise<string> {
+  const qs = [...new Set(queries.map(q => q.trim()).filter(Boolean))]
+  if (!qs.length) return ''
+  // 并行召回（每词独立），各词最多取 400 字符，拼一起 LLM 一次看够
+  const results = await Promise.all(qs.map(q => searchRag(q, modeOverride)))
+  // 按行去重（同 chunk 被多词命中只留一次），保序
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const r of results) {
+    for (const line of r.split('\n')) {
+      const t = line.trim()
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      lines.push(line)
+    }
+  }
+  return lines.join('\n')
+}
+
 export async function ragSearch(query: string): Promise<RagResult> {
   await openDb()
   const topK = config.rag.topK

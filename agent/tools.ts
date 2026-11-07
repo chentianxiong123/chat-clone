@@ -1,5 +1,5 @@
 import { config } from './config.js'
-import { searchRag } from './rag.js'
+import { searchRag, searchRagBatch } from './rag.js'
 import { addFact, searchFacts } from './memory.js'
 import type { ToolSpec, ToolExecutor } from './llm.js'
 
@@ -44,6 +44,32 @@ export async function searchMemoryNote(sceneKey: string, query: string, mode?: s
   if (!raw || !relevant(query, raw)) return ''
   // 对话对：user=对方、assistant=你（本人）。转成"对方/你"标签，模型看真实接话语境。
   // 前缀明确"多年前真实记录，只学语气、别当现在接"（防旧记忆污染当前话题）。
+  return `【多年前的真实聊天记录（只学说话语气/口癖，不是现在在聊的）】\n` +
+    raw.split('\n').map(l => {
+      if (l.startsWith('assistant:')) return `你：${l.replace(/^assistant:\s*/, '').trim()}`
+      if (l.startsWith('user:')) return `对方：${l.replace(/^user:\s*/, '').trim()}`
+      return l
+    }).join('\n')
+}
+
+/**
+ * 批量版 searchMemoryNote：LLM 一次给多个关键词，一次召回 union。
+ * 减少 ReAct 往返——不用反复"搜一个词→没翻到→换词"，一次给够上下文。
+ * 每个词各走 searchRagBatch 的 union 召回，拼成一段"多年前真实记录"喂给 LLM。
+ */
+export async function searchMemoryNoteBatch(
+  sceneKey: string, queries: string[], mode?: string,
+): Promise<string> {
+  const qs = [...new Set(queries.map(q => q.trim()).filter(Boolean))]
+  if (!qs.length) return ''
+  // 先查 facts（稳定事实，精确命中优先），任一词命中就直接给
+  for (const q of qs) {
+    const facts = searchFacts(sceneKey, q, config.rag.toolMaxItems)
+    if (facts.length) return facts[0].slice(0, config.rag.factMaxChars)
+  }
+  // 批量 RAG union 召回（rag.ts searchRagBatch：多词各调 searchRag，行级去重）
+  const raw = await searchRagBatch(qs, mode)
+  if (!raw) return ''
   return `【多年前的真实聊天记录（只学说话语气/口癖，不是现在在聊的）】\n` +
     raw.split('\n').map(l => {
       if (l.startsWith('assistant:')) return `你：${l.replace(/^assistant:\s*/, '').trim()}`
