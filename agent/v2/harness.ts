@@ -61,6 +61,23 @@ export class Harness {
   private pending = new Map<string, Pending>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private inflight = new Set<string>()
+  private connected = false
+
+  /** 协议端连接状态（QQ/milky 插上/断开） */
+  setConnected(v: boolean): void {
+    if (this.connected === v) return
+    this.connected = v
+    this.emitStored({ type: 'connection.changed', thread: '', connected: v, at: Date.now() } as unknown as V2Event)
+  }
+
+  /** 清空全部内存上下文（对齐 pi reset：模拟/QQ 会话都清，归档不动） */
+  clearAll(): void {
+    for (const t of this.timers.values()) clearTimeout(t)
+    this.timers.clear()
+    this.pending.clear()
+    this.inflight.clear()
+    this.runtime.clearSessions()
+  }
 
   constructor(
     private readonly bus: EventBus,
@@ -82,13 +99,15 @@ export class Harness {
     const meta = touchThread(msg)
     this.emitStored({ type: 'message.received', thread: key, message: msg, at: msg.at ?? Date.now() })
     this.emitStored({ type: 'thread.updated', thread: key, at: Date.now() })
+    console.log(`[V2] 收到 ${key} ${msg.atBot ? '(@)' : ''} ${msg.senderNick}: ${msg.text.slice(0, 40)}`)
 
     if (meta.paused) {
-      console.log(`[Harness] ${key} 已暂停，只记录不回复`)
+      console.log(`[V2] ${key} 已暂停，只记录不回复`)
       return null
     }
 
     if (thread.channel === 'sim' && !msg.policy) {
+      console.log(`[V2] 模拟直发 ${key}（不攒批）`)
       return this.runNow(thread, [msg], {
         reason: msg.atBot ? 'mention' : 'message',
         batchSize: 1,
@@ -118,6 +137,7 @@ export class Harness {
       g.triggerNick = msg.senderNick
     }
     if (g.lines.length > g.targetN) g.lines = g.lines.slice(-g.targetN)
+    console.log(`[V2] 攒批 ${key} (${g.lines.length}/${g.targetN}${g.woke ? '' : ' 待唤醒'}): ${msg.text.slice(0, 30)}`)
 
     if (thread.kind === 'private') {
       void this.flush(key)
@@ -138,7 +158,10 @@ export class Harness {
       this.timers.delete(key)
       const cur = this.pending.get(key)
       if (!cur) return
-      if (cur.woke || cur.lines.length >= cur.targetN) void this.flush(key)
+      const n = cur.lines.length
+      const shouldFlush = cur.woke || n >= cur.targetN
+      console.log(`[V2] 群静默到期 ${key} (${n}/${cur.targetN}${cur.woke ? ' 唤醒' : ''}) → ${shouldFlush ? '触发' : '继续等'}`)
+      if (shouldFlush) void this.flush(key)
     }, config.batch.t)
     this.timers.set(key, handle)
   }
@@ -148,6 +171,7 @@ export class Harness {
     const g = this.pending.get(key)
     if (!g) return
     if (!force && g.thread.kind === 'group' && !g.woke && g.lines.length < g.targetN) return
+    console.log(`[V2] 触发 ${key} ${g.lines.length}条 ${g.woke ? '(唤醒)' : '(攒够)'}`)
     this.pending.delete(key)
     const timer = this.timers.get(key)
     if (timer) { clearTimeout(timer); this.timers.delete(key) }
@@ -270,9 +294,11 @@ export class Harness {
 
   getSnapshot(): Record<string, unknown> {
     return {
-      connected: true,
-      mode: 'v2-sim',
+      connected: this.connected,
+      mode: 'v2-pi',
       batch: { nMin: config.batch.nMin, nMax: config.batch.nMax, t: config.batch.t },
+      batchN: config.batch.nMin,
+      batchT: config.batch.t,
       sim: {
         groupMin: config.sim.groupMin,
         groupMax: config.sim.groupMax,

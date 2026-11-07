@@ -1,7 +1,6 @@
 import { createServer } from 'node:http'
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
-import { AgentCore } from './core.js'
 import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'
 import { ragImportInfo, ragSearch, ragStatus, searchRag } from './rag.js'
@@ -85,7 +84,7 @@ const ENV_PRESETS: Array<{ name: string; label: string; description: string; pat
   },
 ]
 
-export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof createServer> {
+export function startWebUI(v2?: AgentKernel): ReturnType<typeof createServer> {
   const clients = new Set<{ write: (s: string) => void }>()
   const v2Clients = new Set<{ write: (s: string) => void }>()
   if (v2) {
@@ -94,12 +93,6 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       for (const c of v2Clients) c.write(payload)
     })
   }
-
-  // 核心状态变化 → SSE 广播
-  const unsubscribe = core.subscribe(snap => {
-    const payload = `data: ${JSON.stringify({ type: 'state', snap })}\n\n`
-    for (const c of clients) c.write(payload)
-  })
 
   let logPos = 0
   void logPos
@@ -156,10 +149,10 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 
   // ── 协议端面板：状态（channel + 连接 + napcat 配置 + milky）──
   router.get('/api/protocol/status', async ctx => {
-    const snap = core.getSnapshot()
+    const snap = v2 ? v2.getSnapshot() : {}
     json(ctx.res, 200, {
       channel: config.channel,
-      connected: snap.connected,
+      connected: (snap as { connected?: boolean }).connected ?? false,
       napcat: { host: config.napcat.host, port: config.napcat.port, protocol: config.napcat.protocol },
       milky: await milkyCtl.status(),
     })
@@ -357,7 +350,7 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
         })
-        res.write(`data: ${JSON.stringify({ type: 'state', snap: core.getSnapshot() })}\n\n`)
+        res.write(`data: ${JSON.stringify({ type: 'state', snap: v2 ? v2.getSnapshot() : {} })}\n\n`)
         const client = { write: (s: string) => res.write(s) }
         clients.add(client)
         req.on('close', () => {
@@ -502,7 +495,7 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
 
       // ── 实时状态（快照）──
       if (path === '/api/state') {
-        return json(res, 200, core.getSnapshot())
+        return json(res, 200, v2 ? v2.getSnapshot() : {})
       }
 
       // ── 用量统计 ──
@@ -547,14 +540,16 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
         if (scene === 'group' && (id < config.sim.groupMin || id > config.sim.groupMax)) {
           return json(res, 403, { error: `模拟群号必须在 ${config.sim.groupMin}~${config.sim.groupMax}，真群请走 QQ 通道` })
         }
-        core.handleMessage({
-          scene,
-          groupId: id,
-          senderId: id,
+        const simId = id
+        if (!v2) return json(res, 503, { error: 'v2 kernel not enabled' })
+        void v2.handleMessage({
+          thread: { channel: 'sim', kind: scene, externalId: simId },
+          senderId: Number(body.senderId) || simId,
           senderNick: who,
           text,
           atBot: !!body.atBot,
           simulated: true,
+          at: Date.now(),
         })
         return json(res, 200, { ok: true, scene, id })
       }
@@ -571,17 +566,17 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
       // ── 立即触发攒批 ──
       if (path === '/api/flush' && req.method === 'POST') {
         const body = await readBody(req)
-        const key = body.key || `g:${body.groupId}`
-        core.flush(key)
-        return json(res, 200, { ok: true })
+        // 旧 key "g:900010"/"p:123" → v2 线程 id "sim:g:900010"/"sim:p:123"
+        const key = (body.key || `g:${body.groupId || ''}`) as string
+        const tid = key.startsWith('sim:') ? key : key.startsWith('g:') || key.startsWith('p:') ? `sim:${key}` : key
+        const flushed = v2?.flushThread(tid) ?? false
+        return json(res, 200, { ok: true, flushed })
       }
 
-      // ── 清空上下文：POST {key:"p:123"/"g:100"/空=全部} ──
+      // ── 清空内存上下文（v2：清全部会话 live 上下文，归档不动）──
       if (path === '/api/clear' && req.method === 'POST') {
-        const body = await readBody(req)
-        const key = typeof body?.key === 'string' && body.key ? body.key : undefined
-        core.clearDialog(key as Parameters<typeof core.clearDialog>[0])
-        return json(res, 200, { ok: true, cleared: key ?? 'all' })
+        v2?.clearDialog()
+        return json(res, 200, { ok: true, cleared: 'all' })
       }
 
       // ── 预设模板列表 ──

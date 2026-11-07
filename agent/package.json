@@ -8,6 +8,8 @@
     "mine": "node --env-file=.env --import tsx mine.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^1.5.0",
+    "@earendil-works/pi-ai": "^1.5.0",
     "@node-rs/jieba": "^2.0.4",
     "node-napcat-ts": "^0.4.25",
     "openai": "^7.5.0",

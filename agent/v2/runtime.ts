@@ -1,11 +1,11 @@
 import { config } from '../config.js'
-import { callLlmWithProviders, callLlmWithTools, type ChatMessage } from '../llm.js'
-import { buildSystemPrompt } from '../prompt.js'
+import { type ChatMessage } from '../llm.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
 import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
-import { createToolRegistry, type SendMessageFn } from './tools.js'
-import { addToolTrace, appendEvent, createRun, finishRun } from './store.js'
+import { PiAgentSession } from '../pi-agent.js'
+import { type SendMessageFn } from './tools.js'
+import { appendEvent, createRun, finishRun } from './store.js'
 import {
   threadKey,
   type InboundMessage, type RunRecord, type ThreadRef, type TurnRequest, type V2Event,
@@ -38,6 +38,30 @@ function styleBias(mods?: StateModifiers): StyleBias | undefined {
 export class AgentRuntime {
   private lastReplyAt = new Map<string, number>()
   private chains = new Map<string, Promise<void>>()
+  private sessions = new Map<string, PiAgentSession>()
+
+  /** 每会话一个 pi session（live 上下文 = pi 内存维护）。key = threadKey(thread) */
+  private sessionFor(thread: ThreadRef): PiAgentSession {
+    const key = threadKey(thread)
+    let s = this.sessions.get(key)
+    if (!s) {
+      s = new PiAgentSession(
+        key,
+        thread.kind === 'group' ? 'group' : 'private',
+        thread.channel === 'qq' && config.agent.getStateEnabled
+          ? () => buildStatePrompt(loadState())
+          : undefined,
+      )
+      this.sessions.set(key, s)
+    }
+    return s
+  }
+
+  /** 清空全部会话内存上下文（live 上下文 = pi 内存，清空即重置；归档不动） */
+  clearSessions(): void {
+    for (const s of this.sessions.values()) s.reset()
+    this.sessions.clear()
+  }
 
   constructor(
     private readonly bus: EventBus,
@@ -90,24 +114,11 @@ export class AgentRuntime {
     try {
       const ctx = req.messages.map(m => `${m.senderNick}: ${m.text}`).join('\n')
       const triggerNick = req.trigger.triggerNick || req.messages[req.messages.length - 1]?.senderNick || ''
-      const { dialog, summary } = loadDialog(key)
-      let hist = dialog
-      if (summary && dialog.length && dialog[0]?.role !== 'user') {
-        hist = [
-          { role: 'user', content: `我们之前的对话摘要：${summary}`, time: Date.now() },
-          { role: 'assistant', content: '（收到，继续聊）', time: Date.now() },
-          ...dialog,
-        ]
-      }
-      hist = hist.slice(-config.agent.maxHistory)
 
       const scopeLine = thread.kind === 'group' && triggerNick
         ? `（这一轮群里有好几个人在说话，你只回应 ${triggerNick} 说的这条，其他人先别管）`
         : ''
-      const scopeMsg: ChatMessage | null = scopeLine
-        ? { role: 'system', content: scopeLine, time: Date.now() }
-        : null
-      const userMsg: ChatMessage = { role: 'user', content: ctx, time: Date.now() }
+      const userContent = `${ctx}\n${scopeLine}${config.persona.name}：`
 
       const mods = thread.channel === 'qq' && config.humanlike.recentState.enabled
         ? computeModifiers(loadState())
@@ -119,78 +130,26 @@ export class AgentRuntime {
         await sleep(Math.max(1000, Math.round(sampleReactMs() * (mods?.reactDelay ?? 1))))
       }
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: buildSystemPrompt(thread.kind) },
-        ...hist,
-        ...(scopeMsg ? [scopeMsg] : []),
-        userMsg,
-      ]
+      // ── pi 内核：每会话一个 PiAgentSession，live 上下文 = pi 内存 messages[] ──
+      const session = this.sessionFor(thread)
+      const r = await session.runOnce(userContent)
 
-      const tools = createToolRegistry(
-        thread,
-        thread.channel === 'qq' && config.agent.getStateEnabled
-          ? () => buildStatePrompt(loadState())
-          : undefined,
-      )
-      const onToolStart = (info: { name: string; args: Record<string, unknown>; startedAt: number }): void => {
-        const callId = `${runId}:${info.name}:${info.startedAt}`
-        this.emit({
-          type: 'tool.started', thread: key, runId, callId,
-          name: info.name, args: info.args, at: info.startedAt,
-        })
-      }
-      const onTool = (info: {
-        name: string; args: Record<string, unknown>; result: string
-        status: 'ok' | 'error'; durationMs: number; startedAt: number
-      }): void => {
-        const callId = `${runId}:${info.name}:${info.startedAt}`
-        addToolTrace({
-          id: callId, runId, name: info.name, args: info.args,
-          result: info.result, status: info.status,
-          startedAt: info.startedAt, durationMs: info.durationMs,
-        })
-        this.emit({
-          type: 'tool.finished', thread: key, runId, callId,
-          name: info.name, result: info.result, status: info.status,
-          durationMs: info.durationMs, at: info.startedAt + info.durationMs,
-        })
-      }
+      toolCalls = r.segments.length
+      tokensIn = r.tokensIn ?? 0
+      tokensOut = r.tokensOut ?? 0
+      cost = r.cost ?? 0
 
-      const llm = config.rag.toolsEnabled
-        ? await callLlmWithTools(messages, {
-            tools: tools.specs,
-            executors: tools.executors,
-            maxIter: config.rag.toolMaxIter,
-            onToolStart,
-            onTool,
-          })
-        : await callLlmWithProviders(messages)
-      providerId = llm.providerId
-      toolCalls = llm.toolCalls ?? 0
-      tokensIn = llm.tokensIn ?? 0
-      tokensOut = llm.tokensOut ?? 0
-      cost = llm.cost ?? 0
-      let raw = llm.text
-      // 模型没调 reply 也没输出内容 → 强制补一句。回不回由外部系统决定；走到这步就是"决定回"。
-      if (!raw && !tools.context.sentByTool) {
-        const fb = await callLlmWithProviders(messages)
-        raw = fb.text
-      }
-      if (!raw && !tools.context.sentByTool) {
-        console.log(`[V2] ${key} 无输出（模型未生成）`)
+      // 沉默：模型没调 reply 也没产出 assistant 文本
+      if (!r.segments.length) {
+        console.log(`[V2] ${key} 无输出（模型沉默/未生成）`)
         status = 'skipped'
         return rec
       }
 
-      // 每条 reply 独立样式，保持"每条一条消息"的工具边界；未走工具则整段兜底。
-      const segs = tools.context.sentByTool && tools.context.sentTexts.length
-        ? tools.context.sentTexts
-        : [raw]
-      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, styleBias(mods)))))
+      // 每条 reply 独立样式，保持"每条一条消息"的工具边界
+      const styled = r.segments.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, styleBias(mods)))))
       reply = styled.join('\n')
-
-      const finalReply = reply
-      if (!finalReply) {
+      if (!reply) {
         status = 'skipped'
         return rec
       }
@@ -199,13 +158,15 @@ export class AgentRuntime {
 
       this.emit({
         type: 'assistant.message', thread: key, runId,
-        text: finalReply, segments, at: Date.now(),
+        text: reply, segments, at: Date.now(),
       })
-      console.log(`[V2] 回复 ${key}: ${finalReply}`)
+      console.log(`[V2] 回复 ${key}: ${reply}`)
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: finalReply, time: Date.now() }
-      const updated: ChatMessage[] = [...hist, userMsg, assistantMsg].slice(-config.agent.maxHistory)
-      await this.persist(key, updated)
+      // 归档：live 上下文已在 session（pi 内存）；落盘仅作纯归档，永不回灌上下文
+      const userMsg: ChatMessage = { role: 'user', content: userContent, time: Date.now() }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: r.assistantText || reply, time: Date.now() }
+      const archived = [...loadDialog(key).dialog, userMsg, assistantMsg].slice(-config.agent.maxHistory)
+      await this.persist(key, archived)
       this.lastReplyAt.set(key, Date.now())
       status = 'ok'
       return rec

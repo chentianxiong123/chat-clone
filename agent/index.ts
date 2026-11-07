@@ -1,6 +1,5 @@
 import { NCWebsocket } from 'node-napcat-ts'
 import { config } from './config.js'
-import { AgentCore } from './core.js'
 import { startWebUI, bindTransport } from './webui.js'
 import { createKernel } from './v2/kernel.js'
 import { QQAdapter } from './v2/channels/qq.js'
@@ -10,11 +9,10 @@ import { milkyCtl } from './milky-ctl.js'
 import { logReply } from './reply-log.js'
 import type { BotTransport } from './v2/channels/transport.js'
 
-const core = new AgentCore()
 const v2 = createKernel()
 
 // ── WebUI（先起，便于连不上协议端时也能进控制台）──
-startWebUI(core, v2)
+startWebUI(v2)
 
 // ── 触发协议端：milky 由 agent spawn（全控制），fs.watch 事件驱动状态；崩了等用户手动拉起 ──
 milkyCtl.init()
@@ -53,26 +51,33 @@ const channelName = config.channel === 'milky' ? 'Milky' : 'NapCat'
 
 try {
   await transport.connect()
-  core.setConnected(true)
-  console.log(`[Bot] 已连接 ${channelName} (攒批 N=${core.getSnapshot().batchN}, T=${core.getSnapshot().batchT}ms)`)
+  v2.setConnected(true)
+  console.log(`[Bot] 已连接 ${channelName}`)
 } catch (e) {
   console.error(`[Bot] 连接 ${channelName} 失败（稍后重连）:`, (e as Error).message)
-  core.setConnected(false)
+  v2.setConnected(false)
 }
 
 // ── 连接状态 ──
-transport.onStatus(ok => core.setConnected(ok))
+transport.onStatus(ok => v2.setConnected(ok))
 
-// ── 群聊消息 ──
+// ── v2 回复出口：路由到当前 transport（milky/napcat）──
+v2.setSender(async (thread, text) => {
+  logReply(thread.kind === 'group' ? 'group' : 'private', thread.externalId, text)
+  if (thread.kind === 'group') await transport.sendGroup(thread.externalId, text)
+  else await transport.sendPrivate(thread.externalId, text)
+})
+
+// ── 群聊消息（v2 内核：攒批+群静默在 harness）──
 transport.onGroup(e => {
   try {
-    core.handleMessage({
-      scene: 'group',
-      groupId: e.groupId,
+    void v2.handleMessage({
+      thread: { channel: 'qq', kind: 'group', externalId: e.groupId },
       senderId: e.senderId,
       senderNick: e.senderNick,
       text: e.text,
       atBot: e.atBot,
+      at: Date.now(),
     })
   } catch (err) {
     console.error('[Bot] 群消息处理错误:', err)
@@ -82,30 +87,21 @@ transport.onGroup(e => {
 // ── 私聊消息 ──
 transport.onPrivate(e => {
   try {
-    core.handleMessage({
-      scene: 'private',
+    void v2.handleMessage({
+      thread: { channel: 'qq', kind: 'private', externalId: e.senderId },
       senderId: e.senderId,
       senderNick: e.senderNick,
       text: e.text,
+      at: Date.now(),
     })
   } catch (err) {
     console.error('[Bot] 私聊处理错误:', err)
   }
 })
 
-// ── 回复出口（核心只调这里，NapCat/Milky 各自实现）──
-core.onReply = async (scene, id, reply) => {
-  logReply(scene, id, reply)
-  if (scene === 'private') {
-    await transport.sendPrivate(id, reply)
-  } else {
-    await transport.sendGroup(id, reply)
-  }
-}
-
-// 主动说话心跳（可选）
+// 主动说话心跳（可选；v2 暂无主动说话，保留定时钩子占位）
 if (config.humanlike.schedule.proactiveGapMs > 0) {
-  setInterval(() => { void core.proactiveTick() }, 60_000)
+  setInterval(() => { /* v2 proactive 待接 */ }, 60_000)
 }
 
 process.on('SIGTERM', () => {

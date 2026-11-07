@@ -4,6 +4,7 @@ import { Harness } from './harness.js'
 import { SimAdapter } from './channels/sim.js'
 import type { QQAdapter } from './channels/qq.js'
 import type { EventListener } from './bus.js'
+import { threadKey } from './types.js'
 import type { InboundMessage, RunRecord, ThreadMeta, ThreadRef, V2Event } from './types.js'
 
 export class AgentKernel {
@@ -12,6 +13,7 @@ export class AgentKernel {
   readonly runtime: AgentRuntime
   readonly harness: Harness
   private qq: QQAdapter | null = null
+  private sender: ((thread: ThreadRef, text: string) => Promise<void>) | null = null
 
   constructor() {
     this.runtime = new AgentRuntime(this.bus, (thread, text) => this.send(thread, text))
@@ -22,12 +24,28 @@ export class AgentKernel {
     this.qq = adapter
   }
 
-  private send(thread: ThreadRef, text: string): Promise<void> {
-    if (thread.channel === 'qq') {
-      if (!this.qq) return Promise.reject(new Error('QQ adapter 未接入'))
-      return this.qq.send(thread, text)
-    }
-    return this.sim.send(thread, text)
+  /** 协议端连接状态（QQ/milky 插上/断开） */
+  setConnected(v: boolean): void {
+    this.harness.setConnected(v)
+  }
+
+  /** 清空全部内存上下文（对齐 pi reset：清 live 上下文，归档不动） */
+  clearDialog(): void {
+    this.harness.clearAll()
+  }
+
+private send(thread: ThreadRef, text: string): Promise<void> {
+    console.log(`[V2] 发送 ${threadKey(thread)}: ${text.slice(0, 50)}`)
+    if (thread.channel === 'sim') return this.sim.send(thread, text)
+    // 非 sim（qq/milky）：优先走外部注入的真实发送（当前 transport）
+    if (this.sender) return this.sender(thread, text)
+    if (!this.qq) return Promise.reject(new Error('QQ adapter 未接入'))
+    return this.qq.send(thread, text)
+  }
+
+  /** 注入真实发送：路由到当前 transport（milky/napcat）。优先于内置 adapter。 */
+  setSender(fn: (thread: ThreadRef, text: string) => Promise<void>): void {
+    this.sender = fn
   }
 
   handleMessage(msg: InboundMessage): Promise<RunRecord | null> {

@@ -87,6 +87,7 @@ export type V2Event =
   | { type: 'tool.started'; thread: string; runId: string; callId: string; name: string; args: Record<string, unknown>; at: number }
   | { type: 'tool.finished'; thread: string; runId: string; callId: string; name: string; result: string; status: string; durationMs: number; at: number }
   | { type: 'thread.updated'; thread: string; at: number }
+  | { type: 'connection.changed'; thread: string; connected: boolean; at: number }
 
 export function threadKey(ref: ThreadRef): string {
   const kind = ref.kind === 'group' ? 'g' : 'p'

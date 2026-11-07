@@ -1,5 +1,7 @@
 import { config } from './config.js'
-import type { SceneType } from './core.js'
+
+/** 场景类型：群聊/私聊 */
+export type SceneType = 'group' | 'private'
 
 /**
  * 构建 system prompt（成熟 agent 稳定前缀结构，参照 OpenClaw/Hermes）：
