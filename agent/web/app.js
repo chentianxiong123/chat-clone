@@ -34,6 +34,7 @@ document.querySelectorAll('.side-item').forEach((btn) => {
     if (page === 'kb') void loadRagInfo()
     if (page === 'models') loadModels()
     if (page === 'config') { loadConfig(); loadServiceConfig() }
+    if (page === 'logs') loadLogsHistory()
     if (page === 'overview') void loadThreadOverview()
     if (page === 'milky' || page === 'napcat') connectProto(); else disconnectProto()
   })
@@ -743,7 +744,6 @@ async function loadPersonaForm() {
   $('pf-wake').value = Array.isArray(p.wakeWords) ? p.wakeWords.join(',') : (p.wakeWords || '')
   $('pf-sys').value = p.systemPromptTemplate || ''
   $('pf-sys-pri').value = p.privateSystemPromptTemplate || ''
-  $('pf-shots').value = Array.isArray(p.demoDialogs) ? p.demoDialogs.join('\n') : (p.demoDialogs || '')
 }
 async function savePersonaConfig() {
   const body = {
@@ -752,7 +752,6 @@ async function savePersonaConfig() {
     wakeWords: $('pf-wake').value.trim(),
     systemPrompt: $('pf-sys').value,
     privateSystemPrompt: $('pf-sys-pri').value,
-    demoDialogs: $('pf-shots').value,
   }
   const r = await fetch('/api/persona/config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -1063,6 +1062,18 @@ async function testModel(id, btn) {
 
 // ── 日志 ──
 let logCount = 0
+function loadLogsHistory() {
+  fetch('/api/logs').then(r => r.json()).then(entries => {
+    if (!Array.isArray(entries) || !entries.length) return
+    const box = $('log-box')
+    box.innerHTML = ''
+    logCount = 0
+    entries.slice(-300).forEach(e => {
+      const entry = Array.isArray(e) ? { t: e[0], l: e[1], level: '' } : e
+      appendLog(entry)
+    })
+  }).catch(() => {})
+}
 function appendLog(entry) {
   const box = $('log-box')
   if (logCount === 0) box.innerHTML = ''
