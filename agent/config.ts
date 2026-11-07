@@ -198,8 +198,8 @@ export const config = {
     // 每次压缩的摘要合并进长期记忆（AstrBot 注入 user 历史摘要对）
     memorySummaryMerging: process.env.MEMORY_SUMMARY_MERGING !== 'false',
     // ── 工具化 agent（MCP 式：模型按需调工具，回复也走 reply 工具）──
-    // 工具循环上限（模型一轮最多调几次工具；防小模型死循环）
-    toolMaxIter: Math.max(1, Math.round(envNum('AGENT_TOOL_MAX_ITER', 4))),
+    // 工具循环上限（模型一轮最多调几次工具；给足 ReAct 思考轮次——先想/反复搜/才决定回不回）
+    toolMaxIter: Math.max(1, Math.round(envNum('AGENT_TOOL_MAX_ITER', 8))),
     // 纯净模式：剔除一切提示词（SOUL/示例/工具契约/回复规则），只剩最小身份——纯聊天助手
     pureMode: process.env.PURE_MODE === 'true',
     // get_state 工具开关：默认关——状态不喂给 LLM（外部系统控制行为，模型不该围着状态走）

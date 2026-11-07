@@ -114,6 +114,16 @@ export function clearDialogDb(key: string): void {
   } catch { /* ignore */ }
 }
 
+/** 清空整张 scene_dialog 表（全部场景历史）。clearDialog(undefined) 用它，避免只清内存漏了 DB 残留。 */
+export function clearDialogDbAll(): void {
+  const db = openDb()
+  if (!db) { console.log('[Memory] clearDialogDbAll: openDb=null，跳过'); return }
+  try {
+    const r = db.prepare(`DELETE FROM scene_dialog`).run()
+    console.log(`[Memory] clearDialogDbAll: 删除 ${r.changes} 行`)
+  } catch (e) { console.log(`[Memory] clearDialogDbAll 出错: ${e}`) }
+}
+
 export function listSceneSummaries(): Array<{ key: string; summary: string; updatedAt: number; dialogLen: number }> {
   const db = openDb()
   if (!db) return []

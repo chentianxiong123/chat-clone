@@ -1,12 +1,12 @@
 import { config } from './config.js'
 import { callLlm, callLlmWithTools, type ChatMessage, type ToolSpec } from './llm.js'
-import { buildSystemPrompt, buildDemoDialog } from './prompt.js'
+import { buildSystemPrompt } from './prompt.js'
 import { MEMORY_TOOLS, REPLY_TOOL, GET_STATE_TOOL, createAgentExecutors } from './tools.js'
 import { relevanceScore } from './dynamics.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, stateReplyProb, type StyleBias } from './profile.js'
 import { recordGroupMsg, recordGroupReply } from './stats.js'
 import {
-  loadDialog, saveDialog, clearDialogDb, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys, splitIntoRounds,
+  loadDialog, saveDialog, clearDialogDb, clearDialogDbAll, shouldCompress, compressDialog, countMessagesTokens, listSceneKeys, splitIntoRounds,
 } from './memory.js'
 import {
   loadState, saveState, resetState, onMessage, onReply, decayState, computeModifiers,
@@ -424,11 +424,9 @@ export class AgentCore {
         ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
       ]
       // system 纯静态（缓存前缀稳定）；随机示例（动态）放消息尾部、历史之后——官方：静态前缀/动态尾部
-      const demoMsg = buildDemoDialog()
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(demoMsg ? [{ role: 'user', content: demoMsg } as ChatMessage] : []),
         userMsg,
       ]
       if (config.log.level === 'debug') {
@@ -442,13 +440,9 @@ export class AgentCore {
           executors,
           maxIter: config.agent.toolMaxIter,
         })
+        // 回复来源：模型调 reply 攒的话优先；否则若模型直接文本开口（没走工具）也认——开口了就算话
         raw = toolReplies.length ? toolReplies.join('\n') : r.text
       } else {
-        raw = await callLlm(messages)
-      }
-      // 模型没调 reply 也没输出内容 → 强制再生成一句。
-      // 回不回由外部系统（effectiveReplyProb）决定；走到这一步就是"决定回"，模型必产出，不再沉默。
-      if (!raw) {
         raw = await callLlm(messages)
         if (!raw) {
           console.log(`[Core] ${key} 无输出（模型未生成）`)
@@ -456,8 +450,13 @@ export class AgentCore {
           return
         }
       }
+      // 工具模式下模型既没调 reply 也没直接开口（想完真没话说）→ 这轮沉默。
+      if (config.rag.toolsEnabled && !raw) {
+        console.log(`[Core] ${key} 模型未调 reply（选择沉默）`)
+        this.emit()
+        return
+      }
       // 话术风格后处理：每条 reply 独立样式（表情/语气词/错字），保持"每条一条消息"的工具边界。
-      // 分段源 = 模型调用的 reply 工具序列（每条一条）；未走工具则整段兜底。
       const segs = toolReplies.length ? toolReplies : [raw]
       const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, this.styleBias(mods)))))
       let reply = styled.join('\n')
@@ -545,11 +544,9 @@ export class AgentCore {
         ...(config.agent.getStateEnabled ? [GET_STATE_TOOL] : []),
       ]
       // system 纯静态（缓存前缀稳定）；随机示例（动态）放消息尾部、历史之后——官方：静态前缀/动态尾部
-      const demoMsg = buildDemoDialog()
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...hist,
-        ...(demoMsg ? [{ role: 'user', content: demoMsg } as ChatMessage] : []),
         userMsg,
       ]
       if (config.log.level === 'debug') {
@@ -562,14 +559,13 @@ export class AgentCore {
           executors,
           maxIter: config.agent.toolMaxIter,
         })
+        // 回复来源：调 reply 攒的话优先；否则直接文本开口也认；都没 = 沉默
         raw = toolReplies.length ? toolReplies.join('\n') : r.text
       } else {
         raw = await callLlm(messages)
       }
-      if (!raw) {
-        raw = await callLlm(messages)
-        if (!raw) return
-      }
+      // 工具模式下没话（没调 reply 也没直接开口）→ 不想冒泡，不发
+      if (config.rag.toolsEnabled && !raw) return
       const segs = toolReplies.length ? toolReplies : [raw]
       const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, this.styleBias(mods)))))
       let reply = styled.join('\n')
@@ -731,14 +727,12 @@ export class AgentCore {
       if (config.agent.memoryPersist) clearDialogDb(key)
       console.log(`[Core] 清空场景 ${key} 的会话记忆`)
     } else {
-      const keys = [...this.dialogs.keys()]
       this.dialogs.clear()
       this.pending.clear()
       for (const t of this.timers.values()) clearTimeout(t.handle)
       this.timers.clear()
-      if (config.agent.memoryPersist) {
-        for (const k of keys) clearDialogDb(k)
-      }
+      // 清全部 DB 场景历史（不能只按内存 keys 清——重启后内存空、DB 历史还在，会残留污染下次上下文）
+      if (config.agent.memoryPersist) clearDialogDbAll()
       this.recentState = resetState(this.stateKey)
       this.persistState(true)
       console.log('[Core] 清空全部会话记忆')
