@@ -279,12 +279,6 @@ async function loadPersona() {
       ${p.traits?.length ? `<div class="flex flex-wrap gap-1">${p.traits.map(t => `<span class="badge badge-sm badge-outline">${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="text-slate-500 text-xs">LLM: <span class="font-mono">${esc(res.llm?.model || '--')}</span></div>
     </div>`
-  const shots = p.demoDialogs || p.fewShots || ''
-  $('persona-shots').innerHTML = Array.isArray(shots)
-    ? shots.map((s) => `<div class="glass round-lg p-2 text-[11px] font-mono">${esc(s)}</div>`).join('')
-    : (typeof shots === 'string' && shots.trim()
-      ? shots.split('\n').map((s) => `<div class="glass round-lg p-2 text-[11px] font-mono whitespace-pre-wrap">${esc(s)}</div>`).join('')
-      : '<div class="text-slate-600">未配置 few-shot 示例（PERSONA_DEMO_DIALOGS）</div>')
 }
 
 // ── 长期记忆 ──
