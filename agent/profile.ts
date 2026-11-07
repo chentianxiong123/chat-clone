@@ -12,7 +12,6 @@ import { config } from './config.js'
  *   - 同一个人连发的条数/间隔      → typing.charsPerSec, typing.segGap, typing.maxSegments
  *   - 真人单轮长度分位数(如P80)    → style.maxChars
  *   - 语料的 emoji/语气词/错字频次 → style.emojiProb/emoji, fillerProb/fillers, typoProb/typoMap
- *   - 复读对方词的次数            → style.echoProb
  *   - 全天分时段活跃量            → schedule.quietHours, schedule.drowsy[]
  *   - 消息→回复的应答比           → replyProb.group/private
  */
@@ -254,7 +253,6 @@ export interface StyleBias {
   emojiProb?: number
   fillerProb?: number
   typoProb?: number
-  echoProb?: number
   maxChars?: number
 }
 
@@ -262,16 +260,14 @@ export interface StyleBias {
  * 对 LLM 输出的回复做"话术风格"轻量后处理（D 维）。
  * 只做小概率修饰与收敛，不改内容、不抢 LLM 的语境。
  * @param reply LLM 原始输出
- * @param ctx 对方消息上下文（用于 echo 回敬关键词，可空）
  * @param bias 近期状态带来的风格偏置（概率/长度），不传则用 env 配置
  */
-export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): string {
+export function applyStyle(reply: string, bias?: StyleBias): string {
   const st = config.humanlike.style
   if (!reply.trim()) return reply
   const emojiProb = bias?.emojiProb ?? st.emojiProb
   const fillerProb = bias?.fillerProb ?? st.fillerProb
   const typoProb = bias?.typoProb ?? st.typoProb
-  const echoProb = bias?.echoProb ?? st.echoProb
   const maxChars = bias?.maxChars ?? st.maxChars
   let out = reply
   const lines = out.split('\n')
@@ -312,23 +308,7 @@ export function applyStyle(reply: string, ctx?: string, bias?: StyleBias): strin
     out = (cutAt > maxChars * 0.5 ? slice.slice(0, cutAt + 1) : slice) + '……'
   }
 
-  // 5) 回敬对方关键词（复读/接话）
-  if (chance(echoProb) && ctx) {
-    const kw = lastWord(ctx)
-    if (kw && kw.length >= 2 && !out.includes(kw)) {
-      out = out.trimEnd() + `，就你说的${kw}呗`
-    }
-  }
-
   return out
-}
-
-/** 从对方消息取"最后一个像词的片段"（中文取尾词，可能含标点）。简单启发式 */
-export function lastWord(ctx: string): string {
-  const m = /:([^:\n]*)$/.exec(ctx.trim())
-  const tail = (m ? m[1] : ctx).trim().replace(/[，。！？!?,.…\s]+$/u, '')
-  // 取尾部 2~6 字（整句最后"词"）
-  return tail.slice(-6)
 }
 
 /** 机制词（暴露"我在查记忆/调工具"的人机痕迹）。真人只说"记不清了/忘了"，不说"翻了翻记忆"。 */

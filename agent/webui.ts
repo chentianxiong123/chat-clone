@@ -15,6 +15,7 @@ import { json, readBody, type Ctx } from './transport/http/http.js'
 import { Router } from './transport/http/router.js'
 import { registerModelsRoutes } from './transport/http/routes/models.js'
 import { milkyCtl, MILKY_HTML } from './milky-ctl.js'
+import { getReplies, clearReplies } from './reply-log.js'
 import type { BotTransport } from './v2/channels/transport.js'
 
 // ── 当前协议端插头（index.ts 创建后 bind，面板「重连」用）──
@@ -556,6 +557,15 @@ export function startWebUI(core: AgentCore, v2?: AgentKernel): ReturnType<typeof
           simulated: true,
         })
         return json(res, 200, { ok: true, scene, id })
+      }
+
+      // ── 模拟回复捕获：读最近回复（调优味道用）──
+      if (path === '/api/replies' && req.method === 'GET') {
+        return json(res, 200, { replies: getReplies(20) })
+      }
+      if (path === '/api/replies' && req.method === 'DELETE') {
+        clearReplies()
+        return json(res, 200, { ok: true })
       }
 
       // ── 立即触发攒批 ──

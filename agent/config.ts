@@ -298,8 +298,6 @@ export const config = {
       typoMap: String(process.env.HL_STYLE_TYPOS || '在=再,吗=嘛,呢=呐,的=得').split(',').map(p => p.trim()).filter(Boolean)
         .map(p => { const [from, to] = p.split('='); return from && to ? { from: from.trim(), to: to.trim() } : null })
         .filter((x): x is { from: string; to: string } => !!x),
-      // 偶尔"回敬"对方最后一个词（复读/接话）
-      echoProb: clamp01(Number(process.env.HL_STYLE_ECHO_PROB) || 0.08),
     },
     // ── E. 日程节律 —— 什么时候活 ──
     schedule: {

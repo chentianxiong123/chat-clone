@@ -7,6 +7,7 @@ import { QQAdapter } from './v2/channels/qq.js'
 import { NapCatTransport } from './v2/channels/napcat.js'
 import { MilkyTransport } from './v2/channels/milky.js'
 import { milkyCtl } from './milky-ctl.js'
+import { logReply } from './reply-log.js'
 import type { BotTransport } from './v2/channels/transport.js'
 
 const core = new AgentCore()
@@ -94,6 +95,7 @@ transport.onPrivate(e => {
 
 // ── 回复出口（核心只调这里，NapCat/Milky 各自实现）──
 core.onReply = async (scene, id, reply) => {
+  logReply(scene, id, reply)
   if (scene === 'private') {
     await transport.sendPrivate(id, reply)
   } else {

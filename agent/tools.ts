@@ -27,8 +27,10 @@ function relevant(query: string, note: string): boolean {
   }
   for (const w of (q.match(/[a-zA-Z0-9_]{2,}/g) || [])) grams.add(w.toLowerCase())
   if (!grams.size) return false
-  for (const g of grams) if (n.includes(g)) return true
-  return false
+  // 相关性闸门：需共享 ≥2 个不同 bigram（原 1 个太松，无关记忆会塞进来跑题；宁缺毋滥）
+  let hits = 0
+  for (const g of grams) if (n.includes(g)) hits++
+  return hits >= 2
 }
 
 /**
@@ -41,11 +43,13 @@ export async function searchMemoryNote(sceneKey: string, query: string, mode?: s
   const raw = await searchRag(query, mode)
   if (!raw || !relevant(query, raw)) return ''
   // 对话对：user=对方、assistant=你（本人）。转成"对方/你"标签，模型看真实接话语境。
-  return raw.split('\n').map(l => {
-    if (l.startsWith('assistant:')) return `你：${l.replace(/^assistant:\s*/, '').trim()}`
-    if (l.startsWith('user:')) return `对方：${l.replace(/^user:\s*/, '').trim()}`
-    return l
-  }).join('\n')
+  // 前缀明确"多年前真实记录，只学语气、别当现在接"（防旧记忆污染当前话题）。
+  return `【多年前的真实聊天记录（只学说话语气/口癖，不是现在在聊的）】\n` +
+    raw.split('\n').map(l => {
+      if (l.startsWith('assistant:')) return `你：${l.replace(/^assistant:\s*/, '').trim()}`
+      if (l.startsWith('user:')) return `对方：${l.replace(/^user:\s*/, '').trim()}`
+      return l
+    }).join('\n')
 }
 
 export const MEMORY_TOOLS: ToolSpec[] = [
@@ -54,8 +58,8 @@ export const MEMORY_TOOLS: ToolSpec[] = [
     function: {
       name: 'search_past_memory',
       description:
-        '查本人和朋友过去真实聊过的话、用过的说法/口癖/梗（从历史聊天提炼的知识库）。' +
-        '每次开口前可用它查一下，用查到的味道接现在这句；想不起就直说记不清。',
+        '查本人和朋友**多年前**真实聊过的话、用过的说法/口癖/梗（历史聊天知识库）。' +
+        '只用来学说话语气、回忆旧事，别拿它接现在的话；现在话题以当前对话为准。想不起就换关键词再查。',
       parameters: {
         type: 'object',
         properties: {

@@ -264,6 +264,8 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
   for (const r of sampled) {
     const pairLines = pairs(r.text)
     if (!pairLines.length) continue
+    // 带日期标注：这些是"多年前"的记录，不是现在在聊的（防旧记忆当现状）
+    if (r.date) lines.push(`（记录于 ${r.date}）`)
     for (const line of pairLines) {
       if (total + line.length > MAX_TOTAL_CHARS) break
       lines.push(line)

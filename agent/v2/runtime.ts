@@ -31,7 +31,6 @@ function styleBias(mods?: StateModifiers): StyleBias | undefined {
     emojiProb: clamp01(st.emojiProb * mods.emoji),
     fillerProb: clamp01(st.fillerProb * mods.filler),
     typoProb: clamp01(st.typoProb * mods.typo),
-    echoProb: clamp01(st.echoProb * mods.echo),
     maxChars: st.maxChars > 0 ? Math.max(20, Math.round(st.maxChars * mods.styleLength)) : 0,
   }
 }
@@ -187,7 +186,7 @@ export class AgentRuntime {
       const segs = tools.context.sentByTool && tools.context.sentTexts.length
         ? tools.context.sentTexts
         : [raw]
-      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, ctx, styleBias(mods)))))
+      const styled = segs.map(s => replaceMechanismWords(stripSelfPrefix(applyStyle(s, styleBias(mods)))))
       reply = styled.join('\n')
 
       const finalReply = reply

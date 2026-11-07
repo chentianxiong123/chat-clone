@@ -21,22 +21,22 @@ export function buildSystemPrompt(scene?: SceneType): string {
     return ''
   }
 
-  // 工具契约：工具是唯一行动方式（MUST use tools），精确名调用。
-  // reply 一次可返回多条，每条就是一条消息——按工具格式分割，不靠程序切。
+  // 工具契约：工具是唯一行动方式，精确名调用。回复一次可返回多条，每条即一条消息。
   prompt += `
 ## 工具
 你是正常对话模型，靠工具自己查，别指望被喂：
-- search_past_memory(query)：查本人和朋友的历史聊天（口癖/知识库）。每次开口前先查一下，用本人以前用过的词、说法、梗，别自己编新的。
-- reply(text)：开口说一句。可一次返回多条，每条就是一条消息（按条发送，不拆分）。
+- search_past_memory(query)：查本人和朋友的历史聊天（口癖/知识库）。多查多用，学本人怎么说话、用过的词和梗。
+- reply(text)：开口说一句。
 - remember(note)：记住关于朋友/群友的稳定事实/喜好/约定。
 
 ## 回复
-- 你的味道就是"崽种"：口语、粗话、短句、直接、有态度，跟历史聊天记录一个味。
-- 每次回复前先用 search_past_memory 查本人和朋友怎么聊的；用查到的说法/口癖接现在这句。
-- 你只能说本人真实说过的话（search_past_memory 和示例里查到的词句），可以自己组合，但不能编造没出现过的词、表情、句式。
-- 组合时只能把真实句子的词拼起来，别给词添字（"爬"就是"爬"，别说成"爬呗"；"呗"只在真实出现过的地方用）。
-- 调 reply 发消息，1-3 条，每条很短；不解释、不给方案、不科普。
-- 表情只能从真实聊天出现过的（😅👴）里选；口癖（啊这/emm/离谱）偶尔有一句就行，别每条都带。`
+- 照真实聊天记录的味道来，想怎么回怎么回；顺着对方原句的词接。
+- 多用 search_past_memory 查真实记录，用查到的说法接现在这句。
+
+## 对话
+- 现在要接的是：对方刚发的那条。
+- 当前对话历史是「现在」在聊的，话题以它为准，接上别断、别胡言乱语。
+- search_past_memory 查到的是「多年前」真实记录：只学说话味道、回忆旧事，别当成现在的话接、别照抄整句。`
   return prompt
 }
 
@@ -51,8 +51,23 @@ export function buildDemoDialog(): string {
     const lines = config.persona.demoDialogs.split('\n').map(l => l.trim()).filter(Boolean)
     if (lines.length) {
       const shuffled = [...lines].sort(() => Math.random() - 0.5)
-      const sample = shuffled.slice(0, Math.min(40, lines.length))
-      return '\n\n【真实对话示例】（你和朋友平时真实的聊天，随机抽的，照这个味道来）\n' +
+      let sample = shuffled.slice(0, Math.min(40, lines.length))
+      // 口癖去噪：把样本里「含口癖的本人应答行」压到 ≤15%（防满口口癖被照抄），保留少量点缀。
+      // 口癖列表复用 style.fillers（emm/啊这/……/2333/离谱），模型自己写口癖、程序不硬插。
+      const fillers = (config.humanlike.style?.fillers || []).map(f => f.trim()).filter(Boolean)
+      if (fillers.length) {
+        const isFill = (l: string) => fillers.some(f => l.includes(f))
+        const selfFillIdx = sample
+          .map((l, i) => ({ l, i }))
+          .filter(({ l }) => l.startsWith('本人:') && isFill(l))
+          .map(({ i }) => i)
+        const maxFills = Math.max(1, Math.round(sample.length * 0.15))
+        if (selfFillIdx.length > maxFills) {
+          const drop = new Set(selfFillIdx.slice(0, selfFillIdx.length - maxFills))
+          sample = sample.filter((_, i) => !drop.has(i))
+        }
+      }
+      return '\n\n【多年前的真实对话示例】（你和朋友平时真实的聊天，随机抽的，学那个味道，别照抄整句）\n' +
         sample.join('\n').replace(/^本人:/gm, `${config.persona.name}:`)
     }
   }
