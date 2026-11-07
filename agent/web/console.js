@@ -12,6 +12,8 @@ const S = {
   status: null,
   snapshot: null,
   newKind: 'group',
+  view: 'qq',            // 'qq'=私聊气泡视图 / 'agent'=LLM 关键节点流水
+  toolLogs: [],         // 当前线程所有 run 的工具流水（agent 视图渲染源）
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -149,15 +151,37 @@ async function openThread(id) {
     S.events = []
     S.live.clear()
     S.selectedRun = j.runs?.[0]?.id || null
+    S.toolLogs = buildToolLogs(j.events || [])
     renderThreads()
     renderHeader()
     renderMessages()
     renderInspector()
+    renderAgentView()
     await loadThreads()
   } catch (e) {
     console.warn('openThread', e)
     alert(e.message)
   }
+}
+
+/** 从 events 里提取每个 run 的 LLM 关键节点流水（供 Agent 视图渲染） */
+function buildToolLogs(events) {
+  const out = []
+  for (const e of events) {
+    if (e.type === 'run.finished') {
+      const tl = e.toolLog || []
+      out.push({
+        runId: e.runId,
+        status: e.status,
+        reply: e.reply || '',
+        userPreview: '',
+        searchCount: tl.filter(t => t.name === 'search_past_memory').length,
+        intercepted: tl.filter(t => t.name === 'reply' && t.status === 'intercepted').length,
+        toolLog: tl,
+      })
+    }
+  }
+  return out
 }
 
 function renderHeader() {
@@ -399,6 +423,85 @@ function renderContext(box) {
     ${d.summary ? `<div class="mt-2 rounded-xl border border-white/5 bg-white/[0.02] p-3"><div class="text-[10px] text-slate-500">历史摘要</div><div class="mt-1 text-[10px] text-slate-400 whitespace-pre-wrap">${esc(d.summary)}</div></div>` : ''}`
 }
 
+/** Agent LLM 关键节点流水：按 run 分组，显示每次 search（搜了什么关键词/搜到啥/被门禁拦没拦）+ reply + 最终发出 */
+function renderAgentView() {
+  const box = $('view-agent')
+  if (!box) return
+  const logs = S.toolLogs
+  if (!logs.length) {
+    box.innerHTML = `<div class="p-6 text-center text-slate-600">
+      <div class="text-2xl mb-2">🧠</div>
+      <div class="text-sm">还没有 LLM 调用流水</div>
+      <div class="text-[11px] mt-1">在「私聊·QQ」视图发一条消息，这里会显示 LLM 内部怎么搜/怎么回</div>
+    </div>`
+    return
+  }
+  box.innerHTML = ''
+  for (const entry of logs) {
+    const wrap = document.createElement('div')
+    wrap.className = 'mb-3 rounded-xl border border-white/5 bg-white/[0.02] p-3 fade-in'
+    const statusPill = entry.status === 'ok' ? 'bg-emerald-500/15 text-emerald-300' : entry.status === 'skipped' ? 'bg-slate-500/15 text-slate-400' : 'bg-red-500/15 text-red-300'
+    const statusText = entry.status === 'ok' ? '已回复' : entry.status === 'skipped' ? '沉默' : '失败'
+    const searchLine = entry.searchCount !== undefined ? `<span class="ml-auto text-[10px] text-indigo-300">搜了 ${entry.searchCount} 次${entry.intercepted ? ` · 门禁拦了 ${entry.intercepted} 次` : ''}</span>` : ''
+    const head = `
+      <div class="flex items-center gap-2 mb-2">
+        <span class="pill ${statusPill}">${statusText}</span>
+        <span class="text-[10px] text-slate-500">朋友：${esc(short(entry.userPreview || '', 30))}</span>
+        ${searchLine}
+      </div>`
+    const nodes = (entry.toolLog || []).map((t, i) => {
+      const isSearch = t.name === 'search_past_memory'
+      const isReply = t.name === 'reply'
+      const badge = isSearch ? '🔍' : (isReply ? (t.status === 'intercepted' ? '⛔' : '💬') : '🧩')
+      const badgeCls = t.status === 'intercepted' ? 'text-amber-300' : (isSearch ? 'text-sky-300' : 'text-indigo-300')
+      const label = isSearch ? `搜「${esc(short(String(t.args?.query || ''), 30))}」` : (isReply ? (t.status === 'intercepted' ? 'reply 被门禁拦下' : '回复') : t.name)
+      let detail
+      if (isSearch) {
+        detail = t.result.includes('没想起来')
+          ? '<span class="text-slate-500">没搜到 → 换关键词再搜</span>'
+          : `<span class="text-slate-400">翻到旧记录：${esc(short(t.result, 60))}</span>`
+      } else if (isReply) {
+        detail = t.status === 'intercepted'
+          ? `<span class="text-amber-300">${esc(short(t.result, 80))}</span>`
+          : `<span class="text-emerald-300">${esc(short(t.result, 80))}</span>`
+      } else {
+        detail = `<span class="text-slate-500">${esc(short(t.result, 50))}</span>`
+      }
+      return `
+        <div class="flex items-start gap-2 py-1.5 border-b border-white/5 last:border-0">
+          <span class="${badgeCls} w-4 text-center shrink-0">${badge}</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] text-slate-200">${i + 1}. ${esc(label)}</div>
+            <div class="mt-0.5 text-[10px]">${detail}</div>
+          </div>
+        </div>`
+    }).join('')
+    const replyLine = entry.reply ? `
+      <div class="mt-2 rounded-lg bg-emerald-500/10 border border-emerald-400/20 px-3 py-2">
+        <div class="text-[10px] text-emerald-300 mb-0.5">最终发出</div>
+        <div class="text-[12px] text-emerald-50">${esc(entry.reply)}</div>
+      </div>` : ''
+    wrap.innerHTML = head + (nodes ? `<div class="mt-1">${nodes}</div>` : '') + replyLine
+    box.appendChild(wrap)
+  }
+  box.scrollTop = box.scrollHeight
+}
+
+function switchView(v) {
+  S.view = v
+  const qq = $('view-qq')
+  const agent = $('view-agent')
+  const qqBtn = $('view-qq-btn')
+  const agentBtn = $('view-agent-btn')
+  if (qq) qq.classList.toggle('hidden', v !== 'qq')
+  if (agent) agent.classList.toggle('hidden', v !== 'agent')
+  const on = 'text-white bg-indigo-500/20 border border-indigo-400/30'
+  const off = 'text-slate-400 hover:bg-white/5 border border-transparent'
+  if (qqBtn) qqBtn.className = `h-8 px-3 rounded-lg text-[11px] ${v === 'qq' ? on : off}`
+  if (agentBtn) agentBtn.className = `h-8 px-3 rounded-lg text-[11px] ${v === 'agent' ? on : off}`
+  if (v === 'agent') renderAgentView()
+}
+
 async function refreshInspector() {
   if (!S.active) return
   try {
@@ -598,6 +701,18 @@ function handleEvent(ev) {
   if (ev.type === 'run.finished') {
     $('typing').classList.add('hidden')
     S.events.push(ev)
+    // 更新 Agent 视图流水：push 本 run 的 LLM 关键节点
+    const tl = ev.toolLog || []
+    S.toolLogs.push({
+      runId: ev.runId,
+      status: ev.status,
+      reply: ev.reply || '',
+      userPreview: '',
+      searchCount: tl.filter(t => t.name === 'search_past_memory').length,
+      intercepted: tl.filter(t => t.name === 'reply' && t.status === 'intercepted').length,
+      toolLog: tl,
+    })
+    if (S.view === 'agent') renderAgentView()
     setTimeout(() => refreshInspector(), 120)
     return
   }
@@ -629,6 +744,8 @@ for (const b of document.querySelectorAll('.new-kind')) {
 $('trigger').onclick = trigger
 $('pause').onclick = togglePause
 $('archive').onclick = toggleArchive
+$('view-qq-btn').onclick = () => switchView('qq')
+$('view-agent-btn').onclick = () => switchView('agent')
 for (const b of document.querySelectorAll('.insp-tab')) {
   b.onclick = () => { S.tab = b.dataset.tab; renderInspector() }
 }

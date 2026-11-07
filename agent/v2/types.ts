@@ -73,7 +73,7 @@ export interface ToolTrace {
   name: string
   args: Record<string, unknown>
   result: string
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'intercepted'
   startedAt: number
   durationMs: number
 }
@@ -83,7 +83,7 @@ export type V2Event =
   | { type: 'assistant.message'; thread: string; runId: string; text: string; segments: string[]; at: number }
   | { type: 'assistant.segment'; thread: string; runId: string; text: string; index: number; total: number; at: number }
   | { type: 'run.started'; thread: string; runId: string; trigger: string; at: number }
-  | { type: 'run.finished'; thread: string; runId: string; status: string; reply?: string; error?: string; at: number }
+  | { type: 'run.finished'; thread: string; runId: string; status: string; reply?: string; error?: string; toolLog?: ToolTrace[]; at: number }
   | { type: 'tool.started'; thread: string; runId: string; callId: string; name: string; args: Record<string, unknown>; at: number }
   | { type: 'tool.finished'; thread: string; runId: string; callId: string; name: string; result: string; status: string; durationMs: number; at: number }
   | { type: 'thread.updated'; thread: string; at: number }

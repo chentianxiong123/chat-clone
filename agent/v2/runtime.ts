@@ -8,7 +8,7 @@ import { type SendMessageFn } from './tools.js'
 import { appendEvent, createRun, finishRun } from './store.js'
 import {
   threadKey,
-  type InboundMessage, type RunRecord, type ThreadRef, type TurnRequest, type V2Event,
+  type InboundMessage, type RunRecord, type ThreadRef, type ToolTrace, type TurnRequest, type V2Event,
 } from './types.js'
 import type { EventBus } from './bus.js'
 
@@ -110,6 +110,7 @@ export class AgentRuntime {
     let tokensIn = 0
     let tokensOut = 0
     let cost = 0
+    let lastToolLog: ToolTrace[] = []
 
     try {
       const ctx = req.messages.map(m => `${m.senderNick}: ${m.text}`).join('\n')
@@ -130,10 +131,23 @@ export class AgentRuntime {
         await sleep(Math.max(1000, Math.round(sampleReactMs() * (mods?.reactDelay ?? 1))))
       }
 
-      // ── pi 内核：每会话一个 PiAgentSession，live 上下文 = pi 内存 messages[] ──
+      // pi 内核：每会话一个 PiAgentSession，live 上下文 = pi 内存 messages[]
       const session = this.sessionFor(thread)
       const r = await session.runOnce(userContent)
 
+      // 工具关键节点流水（search 搜了什么/门禁拦没拦/reply）→ ToolTrace[]，挂 run.finished 给前端 agent 视图
+      const toolLog: ToolTrace[] = (r.toolLog ?? []).map((node, i) => ({
+        id: `${runId}_t${i}`,
+        runId,
+        name: node.name,
+        args: node.args ?? {},
+        result: node.resultText ?? '',
+        status: node.intercepted ? 'intercepted' : (node.isError ? 'error' : 'ok'),
+        startedAt: Date.now() - (node.durationMs ?? 0),
+        durationMs: node.durationMs ?? 0,
+       }))
+
+      lastToolLog = toolLog
       toolCalls = r.segments.length
       tokensIn = r.tokensIn ?? 0
       tokensOut = r.tokensOut ?? 0
@@ -188,7 +202,7 @@ export class AgentRuntime {
       finishRun(rec)
       this.emit({
         type: 'run.finished', thread: key, runId, status,
-        reply: rec.reply, error, at: rec.endedAt,
+        reply: rec.reply, error, toolLog: lastToolLog, at: rec.endedAt,
       })
       this.emit({ type: 'thread.updated', thread: key, at: rec.endedAt })
     }
