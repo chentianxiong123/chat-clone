@@ -33,6 +33,8 @@ export function makeTempRagDb(): string {
     { id: 'c5', date: '2024-01-15', user: '机械键盘太吵', asst: '茶轴吧 声音小 手感还行' },
     { id: 'c6', date: '2024-01-16', user: '键盘卡了', asst: '清灰吧 拔了拍一拍' },
     { id: 'c7', date: '2024-06-01', user: '周末干嘛', asst: '没啥安排 你要去的话我陪你' },
+    // 门禁 bigram 贴合：机械键盘卡了话题（assistant 短句含"键盘/卡了"，跟 userContent 重合 ≥2）
+    { id: 'c8', date: '2024-02-20', user: '机械键盘卡了', asst: '键盘卡了就清灰 拔了拍一拍 不行就换个轴' },
   ]
   const ins = db.prepare('INSERT INTO chunks(chunk_id,date,text,char_count,message_count,embed_text,embedded_at) VALUES (?,?,?,?,?,?,?)')
   for (const s of seed) {

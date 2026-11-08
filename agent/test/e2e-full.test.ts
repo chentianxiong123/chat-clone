@@ -205,4 +205,114 @@ describe('e2e：全盘 mock 边界（LLM/RAG/stats），真跑 runtime+pi 内核
     expect(logs.length).toBeGreaterThan(0)
     expect(logs[0].ok).toBe(0)
   })
+
+  it('模拟器群聊（sim kind=group）：多群友消息，只回应 triggerNick（scopeLine）', async () => {
+    // 假 LLM：搜到"加班"相关 → reply
+    setFakeStreamSteps([
+      (s) => pushToolCall(s, 'search_past_memory', { queries: ['加班', '累'] }, { input: 200, output: 20 }),
+      (s) => pushToolCall(s, 'reply', { messages: ['确实麻了'] }, { input: 200, output: 10 }),
+      (s) => pushText(s, '', { input: 10, output: 0 }),
+    ])
+
+    const bus = mockBus()
+    const sent: string[] = []
+    const runtime = new AgentRuntime(bus, (_t, text) => { sent.push(text) })
+
+    const rec = await runtime.runTurn({
+      thread: { channel: 'sim', kind: 'group', externalId: 900001 },
+      trigger: { type: 'message', triggerNick: '群友A' },
+      messages: [
+        { role: 'user', text: '今天好累', senderId: 2, senderNick: '群友B' },
+        { role: 'user', text: '天天加班要死了', senderId: 1, senderNick: '群友A' },
+      ],
+    } as never)
+
+    // 群聊真发（门禁放行）
+    expect(rec.status).toBe('ok')
+    expect(sent.length).toBeGreaterThan(0)
+    // 关键：scopeLine 让 LLM 只回应 triggerNick（群友A 的加班），不回应群友B（好累）
+    // 回复内容应贴"加班"主题
+    expect(sent.join(' ')).toMatch(/麻了|加班|累/)
+  })
+
+  it('mock 真群协议（qq kind=group）：接群消息走真群策略（scopeLine + 群冷却）', async () => {
+    // 假 LLM：搜"键盘/卡/清灰"（临时库 c6 有"键盘卡了→清灰吧 拔了拍一拍"，bigram 贴合 userContent）→ reply
+    setFakeStreamSteps([
+      (s) => pushToolCall(s, 'search_past_memory', { queries: ['键盘', '卡了', '清灰'] }, { input: 200, output: 20 }),
+      (s) => pushToolCall(s, 'reply', { messages: ['清灰吧 拔了拍一拍'] }, { input: 200, output: 10 }),
+      (s) => pushText(s, '', { input: 10, output: 0 }),
+    ])
+
+    const bus = mockBus()
+    const sent: string[] = []
+    // mock 真群协议端 send（不真发 QQ，只记录）
+    const runtime = new AgentRuntime(bus, (_t, text) => { sent.push(text) })
+
+    const rec = await runtime.runTurn({
+      thread: { channel: 'qq', kind: 'group', externalId: 719972557 },
+      trigger: { type: 'message', triggerNick: '群友C' },
+      messages: [
+        { role: 'user', text: '机械键盘卡了', senderId: 3, senderNick: '群友C' },
+      ],
+    } as never)
+
+    // 真群协议 mock：消息接进来，回复走 mock send（不真发 QQ）
+    expect(rec.status).toBe('ok')
+    expect(sent.length).toBeGreaterThan(0)
+    expect(sent.join(' ')).toMatch(/清灰|拍一拍|键盘/)
+    // usage_log 也记录（真群场景同样计量）
+    const logs = readTempUsageLog()
+    expect(logs.length).toBeGreaterThan(0)
+    expect(logs[0].kind).toBe('llm')
+  })
+
+  it('多段回复：reply 发 2-3 句（segments 分段 + segGap）', async () => {
+    // 假 LLM：搜"加班/累"（临时库 c1/c2 有加班语料）→ reply 一次发 2 段
+    setFakeStreamSteps([
+      (s) => pushToolCall(s, 'search_past_memory', { queries: ['加班', '累', '辞职'] }, { input: 200, output: 20 }),
+      (s) => pushToolCall(s, 'reply', { messages: ['累死了', '别卷了 早点睡'] }, { input: 200, output: 30 }),
+      (s) => pushText(s, '', { input: 10, output: 0 }),
+    ])
+
+    const bus = mockBus()
+    const sent: string[] = []
+    const runtime = new AgentRuntime(bus, (_t, text) => { sent.push(text) })
+
+    const rec = await runtime.runTurn({
+      thread: { channel: 'sim', kind: 'private', externalId: 88892 },
+      trigger: { type: 'message', triggerNick: '朋友' },
+      messages: [{ role: 'user', text: '天天加班累死了', senderId: 1, senderNick: '朋友' }],
+    } as never)
+
+    // LLM 掂量回 2 句（不固定 1 句）
+    expect(rec.status).toBe('ok')
+    expect(sent.length).toBe(2)
+    expect(sent[0]).toContain('累死了')
+    expect(sent[1]).toContain('别卷了')
+  })
+
+  it('RAG 错召回被闸门挡：搜到"日本旅游"但话题是"加班"→ gateRelevant 拦', async () => {
+    // 临时 RAG 库没"加班"语料（只有"日本"话题），假 LLM 搜"加班"→ 没翻到相关 → 门禁拦
+    setFakeStreamSteps([
+      (s) => pushToolCall(s, 'search_past_memory', { queries: ['加班', '日本'] }, { input: 200, output: 20 }),
+      // 被拦后模型改搜"加班"（还是没相关）→ 沉默
+      (s) => pushToolCall(s, 'search_past_memory', { queries: ['加班'] }, { input: 200, output: 10 }),
+      (s) => pushText(s, '', { input: 10, output: 0 }),
+    ])
+
+    const bus = mockBus()
+    const sent: string[] = []
+    const runtime = new AgentRuntime(bus, (_t, text) => { sent.push(text) })
+
+    const rec = await runtime.runTurn({
+      thread: { channel: 'sim', kind: 'private', externalId: 88893 },
+      trigger: { type: 'message', triggerNick: '朋友' },
+      messages: [{ role: 'user', text: '天天加班烦死了', senderId: 1, senderNick: '朋友' }],
+    } as never)
+
+    // 搜到不相关（日本）→ 门禁拦 reply，没真发（沉默或短路）
+    // 关键：不会因为"日本旅游"的旧记录就乱接"加班"话题
+    expect(sent.length).toBe(0)
+  })
 })
+
