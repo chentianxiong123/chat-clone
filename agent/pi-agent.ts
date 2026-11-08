@@ -3,6 +3,7 @@
  * runOnce：喂一条 user → pi 跑完整 LLM+工具循环 → 收集 reply 工具攒句 或 assistant 文本 → 返回 segments（空=沉默）。
  */
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
+import { calculateCost } from '@earendil-works/pi-ai'
 import { getPiModel, getPiStreamFn } from './pi-provider.js'
 import { buildSystemPrompt } from './prompt.js'
 import { createPiTools, createGate, type SearchGate } from './pi-tools.js'
@@ -72,9 +73,23 @@ export class PiAgentSession {
 
     const unsub = this.agent.subscribe((event) => {
       if (event.type === 'turn_end') {
-        tokensIn = event.message.usage?.input ?? 0
-        tokensOut = event.message.usage?.output ?? 0
-        cost = event.message.usage?.cost?.total ?? 0
+        const usage = event.message.usage
+        tokensIn = usage?.input ?? 0
+        tokensOut = usage?.output ?? 0
+        // 用 pi 库的 calculateCost 算 cost（不依赖内核自动填 usage.cost；
+        // 读 model.cost（pi-provider 传的 pricePerMIn/Out）× 实际 usage token 数）
+        if (usage) {
+          try {
+            const m = getPiModel()
+            // calculateCost 会写 usage.cost.input/.../total，先初始化 cost 字段防崩
+            ;(usage as { cost?: Record<string, number> }).cost = {
+              input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, totalFromProvider: false,
+            }
+            cost = calculateCost(m, usage)?.total ?? 0
+          } catch {
+            cost = usage?.cost?.total ?? 0
+          }
+        }
       }
       if (event.type === 'message_end' && event.message.role === 'assistant') {
         const texts = (event.message.content ?? [])

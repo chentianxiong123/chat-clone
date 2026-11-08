@@ -4,8 +4,10 @@ import { applyStyle, sampleReactMs, replaceMechanismWords, type StyleBias } from
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
 import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
 import { PiAgentSession } from '../pi-agent.js'
+import { getPiModel } from '../pi-provider.js'
 import { type SendMessageFn } from './tools.js'
 import { appendEvent, createRun, finishRun } from './store.js'
+import { recordUsage } from '../stats.js'
 import {
   threadKey,
   type InboundMessage, type RunRecord, type ThreadRef, type ToolTrace, type TurnRequest, type V2Event,
@@ -107,6 +109,10 @@ export class AgentRuntime {
     let reply = ''
     let toolCalls = 0
     let providerId = ''
+    try {
+      const pm = getPiModel()
+      providerId = pm.name || pm.id || 'unknown'
+    } catch { /* ignore */ }
     let tokensIn = 0
     let tokensOut = 0
     let cost = 0
@@ -200,6 +206,18 @@ export class AgentRuntime {
       rec.tokensOut = tokensOut
       rec.cost = cost
       finishRun(rec)
+      // 写 usage_log（stats.db）——v2 pi 内核自动记 LLM 用量，/api/stats 看板可查
+      recordUsage({
+        kind: 'llm',
+        sub: providerId || 'unknown',
+        ok: status === 'ok' ? 1 : 0,
+        fail: status === 'ok' ? 0 : 1,
+        cost,
+        tokensIn,
+        tokensOut,
+        ts: rec.endedAt,
+        durationMs: rec.endedAt - rec.startedAt,
+      })
       this.emit({
         type: 'run.finished', thread: key, runId, status,
         reply: rec.reply, error, toolLog: lastToolLog, at: rec.endedAt,

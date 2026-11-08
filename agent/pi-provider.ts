@@ -23,8 +23,10 @@ export function getPiStreamFn(): StreamFn {
   const baseUrl = p.baseUrl || config.llm.baseUrl || 'http://127.0.0.1:9999/v1'
   const apiKey = resolveKey(p.apiKey)
   const modelId = p.model || config.llm.model || 'agnes-2.5-flash'
-  const inputPrice = (p.pricePerMIn ?? 0) / 1_000_000
-  const outputPrice = (p.pricePerMOut ?? 0) / 1_000_000
+  // pi 库 calculateCost 假设 cost.input/output 是「每百万 token 价格」（内部 /1e6），
+  // 这里传原始 pricePerMIn/Out（每百万），别提前除（否则双重除 1e6 → cost≈0）
+  const inputPrice = p.pricePerMIn ?? 0
+  const outputPrice = p.pricePerMOut ?? 0
   const maxTokens = p.maxTokens || config.llm.maxTokens || 2048
 
   const provider = createProvider({
