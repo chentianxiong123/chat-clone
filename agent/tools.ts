@@ -1,7 +1,7 @@
 import { config } from './config.js'
 import { searchRag, searchRagBatch } from './rag.js'
 import { addFact, searchFacts } from './memory.js'
-import type { ToolSpec, ToolExecutor } from './llm.js'
+import type { ToolExecutor } from './llm.js'
 
 /** 过去指代关键词：命中则强制先检索（不依赖模型是否主动调工具） */
 const RECALL_RE = /(上次|上回|之前|以前|你说过|我说过|记得|还记得|那时候|当时|是不是说过|你答应|我们聊过|前阵子|前几天)/
@@ -78,49 +78,6 @@ export async function searchMemoryNoteBatch(
     }).join('\n')
 }
 
-export const MEMORY_TOOLS: ToolSpec[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'search_past_memory',
-      description:
-        '查本人和朋友**多年前**真实聊过的话、用过的说法/口癖/梗（历史聊天知识库）。' +
-        '拿不准怎么说时可**多次调用**：每次换更聚焦的关键词，逐步逼近想找的说法，像翻旧聊天记录一样。' +
-        '查到的是多年旧记录，只用来学说话语气、回忆旧事，别照抄、别当成现在在聊的话。',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '要回忆的关键词或问题，例如"上次说要买的耳机"' },
-          method: {
-            type: 'string',
-            enum: ['auto', 'all', 'random', 'vec', 'fts', 'like'],
-            description:
-              '召回方式（可选）：all=三路一起召回；random=随机挑一路；' +
-              'vec/fts/like=指定某一路；auto=默认（向量优先+回退）。不填用系统配置。',
-          },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'remember',
-      description:
-        '记住关于朋友的稳定事实、喜好、约定或重要信息（一句话，尽量简短）。' +
-        '听到值得长期记住的事就调用，比如对方的喜好、计划、约定。',
-      parameters: {
-        type: 'object',
-        properties: {
-          fact: { type: 'string', description: '要记住的一句话事实' },
-        },
-        required: ['fact'],
-      },
-    },
-  },
-]
-
 /** 为某个场景生成工具执行器（sceneKey 用于隔离事实记忆） */
 export function createMemoryExecutors(sceneKey: string): Record<string, ToolExecutor> {
   return {
@@ -141,77 +98,3 @@ export function createMemoryExecutors(sceneKey: string): Record<string, ToolExec
   }
 }
 
-/**
- * reply 工具：模型开口说一句。可一次返回多条（一次响应里多次调用），
- * 每条就是一条消息——按工具格式分割，程序不再拆分。
- */
-export const REPLY_TOOL: ToolSpec = {
-  type: 'function',
-  function: {
-    name: 'reply',
-    description:
-      '开口说话。把你要发的所有消息一次性放进 messages 数组，发几条你自己定（1 条就 1 个元素）。' +
-      `最多 ${config.agent.replyMaxSegments} 条；通常很短，像真人发群消息，别堆、别长篇解释。` +
-      '内容直接是你要对朋友说的话，别带序号/引号。',
-    parameters: {
-      type: 'object',
-      properties: {
-        messages: {
-          type: 'array',
-          items: { type: 'string' },
-          minItems: 1,
-          maxItems: config.agent.replyMaxSegments,
-          description: '按顺序发送的每条消息，一条一个元素，通常很短（几个字到一两句）。',
-        },
-      },
-      required: ['messages'],
-    },
-  },
-}
-
-/**
- * get_state 工具：模型按需查看自己当前状态（精力/心情/消息密度/话题等）。
- * 纯数据、无倾向指令——只有模型真在意状态时才查，避免每轮被状态牵着走。
- */
-export const GET_STATE_TOOL: ToolSpec = {
-  type: 'function',
-  function: {
-    name: 'get_state',
-    description:
-      '查看自己此刻的状态（精力/心情/忙碌/消息密度/距离上次说话/当前话题）。' +
-      '想确认自己"现在什么状态、该不该短句或敷衍"时调用；一般闲聊不用。',
-    parameters: { type: 'object', properties: {} },
-  },
-}
-
-/** 工具执行器回调：reply 说一句（由 core/v2 攒句+发送），getState 返回纯数据状态 */
-export interface AgentToolHooks {
-  reply: (texts: string[]) => Promise<void>
-  getState: () => Promise<string> | string
-}
-
-/**
- * 统一 agent 工具集执行器：记忆 + reply + get_state。
- * 供 core（真实 QQ）与 v2（模拟）共用，只差 reply/getState 的具体实现。
- */
-export function createAgentExecutors(
-  sceneKey: string,
-  hooks: AgentToolHooks,
-): Record<string, ToolExecutor> {
-  return {
-    ...createMemoryExecutors(sceneKey),
-    reply: async (args: Record<string, unknown>) => {
-      const raw = args?.messages
-      const texts = (Array.isArray(raw) ? raw : raw == null ? [] : [raw])
-        .map((t) => String(t ?? '').trim())
-        .filter(Boolean)
-      if (!texts.length) return '（没说：内容为空）'
-      await hooks.reply(texts)
-      return '（已说）'
-    },
-    get_state: async () => {
-      const s = await hooks.getState()
-      return s || '（状态未知）'
-    },
-  }
-}

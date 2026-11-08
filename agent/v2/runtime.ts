@@ -2,7 +2,7 @@ import { config } from '../config.js'
 import { type ChatMessage } from '../llm.js'
 import { applyStyle, sampleReactMs, replaceMechanismWords, type StyleBias } from '../profile.js'
 import { loadDialog, saveDialog, shouldCompress, compressDialog, countMessagesTokens } from '../memory.js'
-import { computeModifiers, loadState, buildStatePrompt, type StateModifiers } from '../state.js'
+import { computeModifiers, loadState, buildStatePrompt, onMessage, onReply, saveState, type StateModifiers } from '../state.js'
 import { PiAgentSession } from '../pi-agent.js'
 import { getPiModel, getActiveProvider } from '../pi-provider.js'
 import { type SendMessageFn } from './tools.js'
@@ -130,9 +130,13 @@ export class AgentRuntime {
         : ''
       const userContent = `${ctx}\n${scopeLine}${config.persona.name}：`
 
-      const mods = thread.channel === 'qq' && config.humanlike.recentState.enabled
-        ? computeModifiers(loadState())
-        : undefined
+      // 状态机读写（仅 qq+enabled）：收到触发消息→onMessage 更新；loadState 读出已衰减状态
+      let state = null
+      if (thread.channel === 'qq' && config.humanlike.recentState.enabled) {
+        state = onMessage(loadState(), ctx, Date.now(), { atBot: !!(req.trigger.reason === 'mention' || req.trigger.reason === 'wake') })
+        saveState(state)
+      }
+      const mods = state ? computeModifiers(state) : undefined
 
       if (thread.channel === 'sim') {
         await sleep(randInt(config.sim.reactMsMin, config.sim.reactMsMax))
@@ -178,6 +182,11 @@ export class AgentRuntime {
       }
 
       const segments = await this.sendSegments(thread, styled, runId)
+
+      // 状态机：发出回复→onReply 消耗精力/社交，更新后写库（仅 qq+enabled）
+      if (state) {
+        saveState(onReply(state, Date.now(), segments.length))
+      }
 
       this.emit({
         type: 'assistant.message', thread: key, runId,

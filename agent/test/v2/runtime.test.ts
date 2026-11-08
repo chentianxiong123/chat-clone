@@ -6,6 +6,7 @@ let runOnceMock: ReturnType<typeof vi.fn>
 
 vi.mock('../../pi-provider.js', () => ({
   getPiModel: () => ({ name: 'agnes-test', id: 'agnes-test', cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 } }),
+  getActiveProvider: () => ({ model: 'agnes-test', name: 'agnes-test' }),
   getPiStreamFn: () => { throw new Error('mock: no stream in unit tests') },
 }))
 
