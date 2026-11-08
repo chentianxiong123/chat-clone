@@ -3,10 +3,12 @@
  * runOnce：喂一条 user → pi 跑完整 LLM+工具循环 → 收集 reply 工具攒句 或 assistant 文本 → 返回 segments（空=沉默）。
  */
 import { Agent } from '@earendil-works/pi-agent-core'
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { calculateCost } from '@earendil-works/pi-ai'
 import { getPiModel, getPiStreamFn } from './pi-provider.js'
 import { buildSystemPrompt } from './prompt.js'
 import { createPiTools, createGate, type SearchGate } from './pi-tools.js'
+import { config } from './config.js'
 
 export interface PiRunResult {
   /** 要发的话（一条=一段；空=沉默） */
@@ -33,6 +35,55 @@ export interface PiToolNode {
   durationMs?: number
 }
 
+/**
+ * 估算一条 pi AgentMessage 的 token（粗略：字符数 / 2，中文≈1 字 1 token，英文≈4 字 1 token 折中）。
+ * 用于 live 上下文超限监测；不精确但够用（pi 官方示例也是 estimateTokens 粗估）。
+ */
+export function estimateMessageTokens(m: AgentMessage): number {
+  const c = m.content
+  let text = ''
+  if (typeof c === 'string') text = c
+  else if (Array.isArray(c)) {
+    // pi 的 content 是 (TextContent | ThinkingContent | ToolCall | ImageContent)[]
+    for (const b of c) {
+      if (typeof b === 'string') text += b
+      else if (b && typeof b === 'object') {
+        const o = b as Record<string, unknown>
+        if (typeof o.text === 'string') text += o.text
+        if (o.input && typeof o.input === 'object') text += JSON.stringify(o.input)
+        if (o.content && typeof o.content === 'string') text += o.content
+      }
+    }
+  }
+  return Math.max(1, Math.ceil([...text].length / 2))
+}
+
+/**
+ * pi 官方 transformContext 钩子：live 上下文超 token 上限时裁旧轮次（最近 N 轮逐字保留）。
+ * 不超就原样返回——不限制模型正常发挥；只在堆到爆窗口前裁最旧的。
+ * 按"轮"裁（一轮 = 一次 user prompt 起），不裁半截工具调用。
+ */
+export async function transformLiveContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
+  const maxTokens = config.llm.maxTokens
+  if (maxTokens <= 0) return messages
+  const total = messages.reduce((s, m) => s + estimateMessageTokens(m), 0)
+  if (total <= maxTokens) return messages // 没超，不动
+  // 超了：保留 system + 最近 N 轮。从尾部往前找"轮边界"（user 消息开头），保留 N 轮
+  const keepRounds = Math.max(3, config.agent.maxContextTurns)
+  // 轮边界 = 非 system 的首个 user 消息。从尾部数 keepRounds 个 user 消息
+  const userIdx: number[] = []
+  for (let i = 0; i < messages.length; i++) {
+    if ((messages[i] as { role?: string }).role === 'user') userIdx.push(i)
+  }
+  const startKeep = userIdx.length > keepRounds ? userIdx[userIdx.length - keepRounds] : 0
+  const pruned = messages.slice(startKeep)
+  if (pruned.length > 0 && pruned.length < messages.length) {
+    const after = pruned.reduce((s, m) => s + estimateMessageTokens(m), 0)
+    console.log(`[Pi] 上下文超限裁剪: ${messages.length}条(${total}tok) → ${pruned.length}条(${after}tok)，保留最近${keepRounds}轮`)
+  }
+  return pruned.length > 0 ? pruned : messages // 裁完还超就保留现状（不裁到 0，模型得有点上下文）
+}
+
 export class PiAgentSession {
   private agent: Agent
   /** 可变缓冲：reply 工具 execute 写进来，runOnce 清空/读取 */
@@ -49,6 +100,8 @@ export class PiAgentSession {
     }, this.gate)
     this.agent = new Agent({
       streamFn: getPiStreamFn(),
+      // live 上下文按 token 监测，超 LLM_MAX_TOKENS 才裁旧轮次（最近 N 轮逐字保留），不限制模型正常发挥
+      transformContext: transformLiveContext,
       initialState: {
         systemPrompt: buildSystemPrompt(sceneType),
         model: getPiModel() as never,
