@@ -37,6 +37,7 @@ vi.mock('../../v2/store.js', () => ({
     started_at: Date.now(), model: '', status: 'pending',
   }),
   finishRun: vi.fn(),
+  addToolTrace: vi.fn(),
 }))
 
 import { AgentRuntime } from '../../v2/runtime.js'
@@ -84,7 +85,7 @@ describe('v2/runtime.ts LLM 用量统计对接（mock 满）', () => {
     expect(rec.status).toBe('ok')
   })
 
-  it('LLM 沉默也记录 usage（ok=0, fail=1, tokensIn=200）', async () => {
+  it('LLM 沉默也记录 usage（skipped=主动选择=ok，tokensIn=200）', async () => {
     runOnceMock = vi.fn().mockResolvedValue({
       segments: [], sentByTool: false, assistantText: '',
       toolLog: [], tokensIn: 200, tokensOut: 0, cost: 0.0001,
@@ -101,8 +102,8 @@ describe('v2/runtime.ts LLM 用量统计对接（mock 满）', () => {
 
     expect(vi.mocked(recordUsage)).toHaveBeenCalled()
     const call = vi.mocked(recordUsage).mock.calls.at(-1)![0]
-    expect(call.ok).toBe(0)
-    expect(call.fail).toBe(1)
+    expect(call.ok).toBe(1)
+    expect(call.fail).toBe(0)
     expect(call.tokensIn).toBe(200)
   })
 

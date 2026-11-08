@@ -74,10 +74,10 @@ export class PiAgentSession {
     const unsub = this.agent.subscribe((event) => {
       if (event.type === 'turn_end') {
         const usage = event.message.usage
-        tokensIn = usage?.input ?? 0
-        tokensOut = usage?.output ?? 0
-        // 用 pi 库的 calculateCost 算 cost（不依赖内核自动填 usage.cost；
-        // 读 model.cost（pi-provider 传的 pricePerMIn/Out）× 实际 usage token 数）
+        // 累加（一次 run 可能多个 LLM turn，每个 turn_end 都要加，不能只留最后一个）
+        tokensIn += usage?.input ?? 0
+        tokensOut += usage?.output ?? 0
+        // 用 pi 库的 calculateCost 算 cost（读 model.cost 的 pricePerMIn/Out × 实际 usage token 数）
         if (usage) {
           try {
             const m = getPiModel()
@@ -85,9 +85,9 @@ export class PiAgentSession {
             ;(usage as { cost?: Record<string, number> }).cost = {
               input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, totalFromProvider: false,
             }
-            cost = calculateCost(m, usage)?.total ?? 0
+            cost += calculateCost(m, usage)?.total ?? 0
           } catch {
-            cost = usage?.cost?.total ?? 0
+            cost += usage?.cost?.total ?? 0
           }
         }
       }

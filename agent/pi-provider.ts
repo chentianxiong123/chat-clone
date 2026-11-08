@@ -8,6 +8,8 @@ import { createModels, createProvider } from '@earendil-works/pi-ai'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { getActiveProvider, resolveKey } from './domain/models/index.js'
+
+export { getActiveProvider }
 import { config } from './config.js'
 
 let _models: ReturnType<typeof createModels> | null = null

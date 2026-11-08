@@ -9,6 +9,7 @@ import {
   isSimGroupId, parseThreadKey, threadKey, threadTitle,
   type InboundMessage, type RunRecord, type ThreadMeta, type ThreadRef, type V2Event,
 } from './types.js'
+import { recordGroupMsg } from '../stats.js'
 
 interface Pending {
   thread: ThreadRef
@@ -101,8 +102,19 @@ export class Harness {
     this.emitStored({ type: 'thread.updated', thread: key, at: Date.now() })
     console.log(`[V2] 收到 ${key} ${msg.atBot ? '(@)' : ''} ${msg.senderNick}: ${msg.text.slice(0, 40)}`)
 
+    // 真群消息计数（group_stats，sim 不记）
+    if (thread.channel === 'qq' && thread.kind === 'group' && thread.externalId) {
+      recordGroupMsg(Number(thread.externalId))
+    }
+
     if (meta.paused) {
       console.log(`[V2] ${key} 已暂停，只记录不回复`)
+      return null
+    }
+
+    // 静默时段（凌晨睡觉时间）直接不回复——sim 通道跳过（测试要随时能测）
+    if (thread.channel !== 'sim' && quietHours()) {
+      console.log(`[V2] ${key} 静默时段，不回复`)
       return null
     }
 

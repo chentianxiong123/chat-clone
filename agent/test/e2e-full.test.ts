@@ -48,6 +48,7 @@ vi.mock('../v2/store.js', () => {
     createRun: (rec: Record<string, unknown>) => { mem.set(String(rec.id), { ...rec }); return rec },
     finishRun: (rec: Record<string, unknown>) => { const r = mem.get(String(rec.id)); if (r) Object.assign(r, rec) },
     appendEvent: () => {},
+    addToolTrace: () => {},
     getRun: (id: string) => mem.get(id) ?? null,
   }
 })
@@ -200,10 +201,10 @@ describe('e2e：全盘 mock 边界（LLM/RAG/stats），真跑 runtime+pi 内核
     } as never)
 
     expect(rec.status).toBe('skipped')
-    // usage_log 仍记录（ok=0）
+    // usage_log 仍记录（skipped=主动选择=ok，非 fail）
     const logs = readTempUsageLog()
     expect(logs.length).toBeGreaterThan(0)
-    expect(logs[0].ok).toBe(0)
+    expect(logs[0].ok).toBe(1)
   })
 
   it('模拟器群聊（sim kind=group）：多群友消息，只回应 triggerNick（scopeLine）', async () => {

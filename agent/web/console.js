@@ -369,29 +369,26 @@ function renderRuns(box) {
 
 function renderTools(box) {
   const runId = S.selectedRun || S.detail?.runs?.[0]?.id
-  const evs = allEvents().filter(e => (!runId || e.runId === runId) && String(e.type).startsWith('tool.'))
-  if (!evs.length) {
+  // 工具流水数据源：run.finished.toolLog（agent 视图同源），不再找从不 emit 的 tool.* 事件
+  const entry = S.toolLogs.find(t => t.runId === runId) || S.toolLogs[S.toolLogs.length - 1]
+  const tools = entry?.toolLog || []
+  if (!tools.length) {
     box.innerHTML = '<div class="text-slate-600">这一轮没有调用工具。</div>'
     return
   }
-  const calls = new Map()
-  for (const e of evs) {
-    const id = e.callId || `${e.runId}:${e.name}`
-    const c = calls.get(id) || { name: e.name, status: '', durationMs: null }
-    if (e.type === 'tool.started') c.name = e.name
-    if (e.type === 'tool.finished') { c.status = e.status; c.durationMs = e.durationMs }
-    calls.set(id, c)
-  }
   box.innerHTML = ''
-  for (const c of calls.values()) {
+  for (const t of tools) {
     const div = document.createElement('div')
     div.className = 'rounded-xl border border-white/5 bg-white/[0.02] p-3 mb-2'
+    const statusCls = t.note && t.note.startsWith('拒绝') ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-medium text-indigo-200">${TOOL_NAME[c.name] || '工具调用'}</span>
-        <span class="pill ${c.status === 'error' ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'}">${c.status === 'error' ? '失败' : c.status === 'ok' ? '完成' : '进行中'}</span>
-        <span class="ml-auto text-[9px] text-slate-600">${fmtDur(c.durationMs)}</span>
-      </div>`
+        <span class="text-[11px] font-medium text-indigo-200">${TOOL_NAME[t.tool] || t.tool}</span>
+        <span class="pill ${statusCls}">${t.note && t.note.startsWith('拒绝') ? '拦截' : '完成'}</span>
+        <span class="ml-auto text-[9px] text-slate-600">${fmtDur(t.ms)}</span>
+      </div>
+      ${t.args?.queries ? '<div class="text-[10px] text-slate-500 mt-1 truncate">搜：' + t.args.queries.join(' / ') + '</div>' : ''}
+      ${t.note ? '<div class="text-[10px] text-slate-400 mt-1 truncate">' + t.note + '</div>' : ''}`
     box.appendChild(div)
   }
 }
