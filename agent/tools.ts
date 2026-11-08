@@ -3,13 +3,6 @@ import { searchRag, searchRagBatch } from './rag.js'
 import { addFact, searchFacts } from './memory.js'
 import type { ToolExecutor } from './llm.js'
 
-/** 过去指代关键词：命中则强制先检索（不依赖模型是否主动调工具） */
-const RECALL_RE = /(上次|上回|之前|以前|你说过|我说过|记得|还记得|那时候|当时|是不是说过|你答应|我们聊过|前阵子|前几天)/
-
-export function needsRecall(text: string): boolean {
-  return RECALL_RE.test(text)
-}
-
 const STOP_BIGRAMS = new Set([
   '什么', '怎么', '为什', '这个', '那个', '一个', '没有', '还是', '不是', '可以',
   '我们', '你们', '他们', '现在', '真的', '是不', '有没', '东西', '事情', '问题',

@@ -65,8 +65,8 @@ export function getPiStreamFn(): StreamFn {
   return _streamFn
 }
 
-/** 已构造的 pi-ai Models（无则懒建）。 */
-export function getPiModels(): ReturnType<typeof createModels> {
+/** 已构造的 pi-ai Models（无则懒建）。内部用。 */
+function getPiModels(): ReturnType<typeof createModels> {
   getPiStreamFn()
   return _models!
 }

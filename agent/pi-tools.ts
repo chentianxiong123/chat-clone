@@ -14,6 +14,16 @@ import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { config } from './config.js'
 import { searchMemoryNote, searchMemoryNoteBatch, createMemoryExecutors } from './tools.js'
 
+/**
+ * 工具执行钩子（pi-agent 注入）。
+ * - reply：开口说话（攒句，由 pi 内核统一发送）
+ * - getState：可选，按需提供状态文本（get_state 工具）
+ */
+export interface AgentToolHooks {
+  reply(texts: string[]): Promise<void>
+  getState?(): Promise<string> | string
+}
+
 /** 把参数 + execute 组装成 pi AgentTool */
 function makeTool(
   name: string,

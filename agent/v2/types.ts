@@ -119,6 +119,3 @@ export function isSimGroupId(id: number): boolean {
   return Number.isInteger(id) && !config.sim.realGroups.includes(id)
 }
 
-export function isSimThread(key: string): boolean {
-  return key.startsWith('sim:')
-}

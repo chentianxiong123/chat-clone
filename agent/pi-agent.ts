@@ -140,9 +140,4 @@ export class PiAgentSession {
   get messageCount(): number {
     return this.agent.state.messages.length
   }
-
-  /** 直接访问 pi Agent（调试/webui） */
-  get raw(): Agent {
-    return this.agent
-  }
 }

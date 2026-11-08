@@ -1,6 +1,5 @@
 import { config, minedProfileMeta } from './config.js'
 import { loadRecentState, saveRecentState, clearRecentState } from './memory.js'
-import type { ChatMessage } from './llm.js'
 
 /**
  * 近期状态（全局，单群场景）
@@ -51,14 +50,6 @@ export interface StateModifiers {
   segments: number    // 分段条数乘数（兴致高说更多段，烦躁就 1-2 段）
   followUp: number    // 追问倾向 0~1（感兴趣时顺嘴追问一句）
   deflect: number     // 岔开话题倾向 0~1（不感兴趣就敷衍岔开）
-}
-
-export interface RecentStateView extends RecentState {
-  msgRate: number
-  replyRate: number
-  silenceMs: number | null
-  modifiers: StateModifiers
-  labels: StateLabels
 }
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
@@ -192,11 +183,6 @@ export function saveState(state: RecentState, key = 'global'): void {
   if (!config.humanlike.recentState.enabled) return
   state.updatedAt = Date.now()
   saveRecentState(key, JSON.stringify(state))
-}
-
-export function resetState(key = 'global'): RecentState {
-  clearRecentState(key)
-  return defaultState()
 }
 
 const POS_RE = /(哈哈|笑死|好耶|牛|赞|喜欢|开心|不错|可以|强|厉害|可爱|好看)/
@@ -376,26 +362,4 @@ export function buildStatePrompt(state: RecentState, now = Date.now()): string {
     `近期约${msgRate.toFixed(1)}条/分；距上次说话${silence}；` +
     `连续对方${state.otherStreak}条/自己${state.selfStreak}条；${topic}`
   return text.slice(0, rs.promptMaxChars)
-}
-
-/**
- * 状态上下文消息（保留导出兼容；不再由 core/v2 预注入——
- * 状态改为 get_state 工具按需查询，避免模型围着状态指令走）。
- */
-export function buildStateContextMessage(state: RecentState, now = Date.now()): ChatMessage | null {
-  const text = buildStatePrompt(state, now)
-  if (!text) return null
-  return { role: 'user', content: text, time: now }
-}
-
-export function stateView(state: RecentState, now = Date.now()): RecentStateView {
-  const windowMin = Math.max(1, config.humanlike.recentState.windowMs / 60_000)
-  return {
-    ...state,
-    msgRate: state.recentMsgs / windowMin,
-    replyRate: state.recentReplies / windowMin,
-    silenceMs: state.lastSelfAt ? Math.max(0, now - state.lastSelfAt) : null,
-    modifiers: computeModifiers(state),
-    labels: stateLabels(state),
-  }
 }
