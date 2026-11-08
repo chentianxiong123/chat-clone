@@ -156,8 +156,9 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
 
   const reply: AgentTool<{ messages: string[] }> = makeTool(
     'reply',
-    '开口说话。把你要发的所有消息一次性放进 messages 数组，发几条你自己定（1 条就 1 个元素）。' +
-      `最多 ${config.agent.replyMaxSegments} 条；通常很短，像真人发群消息，别堆、别长篇解释。` +
+    '开口说话。把你要发的所有消息一次性放进 messages 数组。' +
+      `最多 ${config.agent.replyMaxSegments} 条；像真人发群消息，别堆、别长篇解释。` +
+      '**掂量回几句**：搜到旧记录、话题能展开就回 2~3 条（先接住话头，再补个梗/损一句/追问一句，像真人连发）；只有话题一句话接得住才回 1 条。' +
       '内容直接是你要对朋友说的话，别带序号/引号。**没搜到跟现在话题相近的旧记录前，别调这个**。',
     {
       type: 'object',
@@ -167,7 +168,7 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
           items: { type: 'string' },
           minItems: 1,
           maxItems: config.agent.replyMaxSegments,
-          description: '按顺序发送的每条消息，一条一个元素，通常很短（几个字到一两句）。',
+          description: '按顺序发送的每条消息，一条一个元素。话题能展开就放 2~3 条（先接话头再补梗/损/追问），一句话接得住才放 1 条。',
         },
       },
       required: ['messages'],
