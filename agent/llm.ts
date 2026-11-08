@@ -193,7 +193,7 @@ async function fetchWithProxy(url: string, init: RequestInit): Promise<Response>
   if (!config.rag.embedProxy) return fetch(url, init)
   const { ProxyAgent, fetch: ufetch } = await import('undici')
   const agent = new ProxyAgent(config.rag.embedProxy)
-  return ufetch(url, { ...init, dispatcher: agent } as never)
+  return ufetch(url, { ...init, dispatcher: agent } as never) as unknown as Promise<Response>
 }
 
 function sleep(ms: number): Promise<void> {

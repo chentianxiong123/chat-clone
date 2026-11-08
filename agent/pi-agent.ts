@@ -48,7 +48,7 @@ export function estimateMessageTokens(m: AgentMessage): number {
     for (const b of c) {
       if (typeof b === 'string') text += b
       else if (b && typeof b === 'object') {
-        const o = b as Record<string, unknown>
+        const o = b as unknown as Record<string, unknown>
         if (typeof o.text === 'string') text += o.text
         if (o.input && typeof o.input === 'object') text += JSON.stringify(o.input)
         if (o.content && typeof o.content === 'string') text += o.content
@@ -134,11 +134,10 @@ export class PiAgentSession {
         if (usage) {
           try {
             const m = getPiModel()
-            // calculateCost 会写 usage.cost.input/.../total，先初始化 cost 字段防崩
-            ;(usage as { cost?: Record<string, number> }).cost = {
-              input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, totalFromProvider: false,
-            }
-            cost += calculateCost(m, usage)?.total ?? 0
+            // calculateCost 会写 usage.cost，先初始化 cost 字段防崩
+            const u = usage as unknown as { cost?: Record<string, unknown> }
+            u.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, totalFromProvider: false }
+            cost += calculateCost(m, usage as never)?.total ?? 0
           } catch {
             cost += usage?.cost?.total ?? 0
           }
