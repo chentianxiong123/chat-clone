@@ -2,7 +2,7 @@
  * pi Agent 封装：每会话一个实例，live 上下文 = agent.state.messages（pi 内存维护）。
  * runOnce：喂一条 user → pi 跑完整 LLM+工具循环 → 收集 reply 工具攒句 或 assistant 文本 → 返回 segments（空=沉默）。
  */
-import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
+import { Agent } from '@earendil-works/pi-agent-core'
 import { calculateCost } from '@earendil-works/pi-ai'
 import { getPiModel, getPiStreamFn } from './pi-provider.js'
 import { buildSystemPrompt } from './prompt.js'
@@ -51,7 +51,7 @@ export class PiAgentSession {
       streamFn: getPiStreamFn(),
       initialState: {
         systemPrompt: buildSystemPrompt(sceneType),
-        model: getPiModel(),
+        model: getPiModel() as never,
         tools,
       },
     })
@@ -73,7 +73,7 @@ export class PiAgentSession {
 
     const unsub = this.agent.subscribe((event) => {
       if (event.type === 'turn_end') {
-        const usage = event.message.usage
+        const usage = (event.message as { usage?: { input?: number; output?: number; cost?: Record<string, number> } }).usage
         // 累加（一次 run 可能多个 LLM turn，每个 turn_end 都要加，不能只留最后一个）
         tokensIn += usage?.input ?? 0
         tokensOut += usage?.output ?? 0

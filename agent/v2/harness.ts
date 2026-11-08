@@ -159,7 +159,7 @@ export class Harness {
     return null
   }
 
-  private armIdle(key: string, thread: ThreadRef): void {
+  private armIdle(key: string, _thread: ThreadRef): void {
     const old = this.timers.get(key)
     if (old) clearTimeout(old)
     const g = this.pending.get(key)

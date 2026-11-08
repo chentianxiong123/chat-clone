@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import type { AgentKernel } from './v2/kernel.js'
 import { config, minedProfileMeta } from './config.js'

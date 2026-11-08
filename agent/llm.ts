@@ -1,4 +1,3 @@
-import OpenAI from 'openai'
 import { config } from './config.js'
 import { recordUsage } from './stats.js'
 import {

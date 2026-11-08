@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // 历史代码没按 strict 写，全开 strict 会爆一堆库类型噪音。
+    // 只开"抓孤儿"相关的检查：
+    "noUnusedLocals": true,        // 抓未用 import/变量（零度孤儿）
+    "noUnusedParameters": false,
+    "noImplicitAny": false,         // 关掉，历史代码大量 any
+    "strict": false,                // 关掉 strictNullChecks（大量 possibly undefined 噪音）
+    "useDefineForClassFields": false
+  },
+  "include": ["./*.ts", "./**/*.ts"],
+  "exclude": ["node_modules", "web", "test"]
+}

@@ -1,0 +1,9 @@
+{
+  "entry": ["index.ts", "mine.ts"],
+  "project": ["*.ts", "v2/**/*.ts", "domain/**/*.ts"],
+  "paths": {
+    "entry": ["index.ts", "mine.ts"]
+  },
+  "ignore": ["webui.ts", "web/**", "test/**"],
+  "ignoreBinaries": []
+}

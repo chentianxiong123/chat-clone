@@ -12,7 +12,7 @@
  */
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { config } from './config.js'
-import { searchMemoryNote, searchMemoryNoteBatch, createMemoryExecutors } from './tools.js'
+import { searchMemoryNoteBatch, createMemoryExecutors } from './tools.js'
 
 /**
  * 工具执行钩子（pi-agent 注入）。
@@ -25,13 +25,13 @@ export interface AgentToolHooks {
 }
 
 /** 把参数 + execute 组装成 pi AgentTool */
-function makeTool(
+function makeTool<Args extends Record<string, unknown> = Record<string, unknown>>(
   name: string,
   description: string,
   parameters: Record<string, unknown>,
-  execute: AgentTool<object>['execute'],
-): AgentTool<object> {
-  return { name, label: name, description, parameters, execute }
+  execute: AgentTool<Args>['execute'],
+): AgentTool<Args> {
+  return { name, label: name, description, parameters, execute } as AgentTool<Args>
 }
 
 /**
@@ -116,7 +116,7 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
         },
       },
     },
-    async (_id, params) => {
+    async (_id, params: { queries?: string[]; query?: string; method?: string }) => {
       // 批量 queries[] 优先；兼容单 query
       const qs = [
         ...(Array.isArray(params?.queries) ? params.queries : []),
@@ -155,7 +155,7 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
       properties: { fact: { type: 'string', description: '要记住的一句话事实' } },
       required: ['fact'],
     },
-    async (_id, params) => {
+    async (_id, params: { fact?: string }) => {
       const fact = (params?.fact ?? '').trim()
       if (!fact) return { content: [{ type: 'text', text: '（没记住）' }], details: {} }
       mem.remember({ fact: fact.slice(0, config.rag.factMaxChars) })
@@ -182,7 +182,7 @@ export function createPiTools(sceneKey: string, hooks: AgentToolHooks, gate: Sea
       },
       required: ['messages'],
     },
-    async (_id, params) => {
+    async (_id, params: { messages?: string[] | string }) => {
       const raw = params?.messages
       const texts = (Array.isArray(raw) ? raw : raw == null ? [] : [raw])
         .map((t) => String(t ?? '').trim())

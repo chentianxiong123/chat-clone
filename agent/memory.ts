@@ -2,7 +2,6 @@ import { DatabaseSync } from 'node:sqlite'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
-import { config } from './config.js'
 import { callLlm } from './llm.js'
 import type { ChatMessage } from './llm.js'
 

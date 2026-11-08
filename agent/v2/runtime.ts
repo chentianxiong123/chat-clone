@@ -10,7 +10,7 @@ import { appendEvent, createRun, finishRun, addToolTrace } from './store.js'
 import { recordUsage, recordGroupReply } from '../stats.js'
 import {
   threadKey,
-  type InboundMessage, type RunRecord, type ThreadRef, type ToolTrace, type TurnRequest, type V2Event,
+  type RunRecord, type ThreadRef, type ToolTrace, type TurnRequest, type V2Event,
 } from './types.js'
 import type { EventBus } from './bus.js'
 
@@ -133,7 +133,7 @@ export class AgentRuntime {
       // 状态机读写（仅 qq+enabled）：收到触发消息→onMessage 更新；loadState 读出已衰减状态
       let state = null
       if (thread.channel === 'qq' && config.humanlike.recentState.enabled) {
-        state = onMessage(loadState(), ctx, Date.now(), { atBot: !!(req.trigger.reason === 'mention' || req.trigger.reason === 'wake') })
+        state = onMessage(loadState(), ctx, Date.now(), { atBot: req.trigger.reason === 'mention' })
         saveState(state)
       }
       const mods = state ? computeModifiers(state) : undefined
@@ -224,14 +224,14 @@ export class AgentRuntime {
       for (let i = 0; i < lastToolLog.length; i++) {
         const t = lastToolLog[i]
         addToolTrace({
-          id: `${runId}_t${i}`,
-          runId,
-          name: t.name ?? 'unknown',
-          args: t.args ?? {},
-          result: t.resultText ?? '',
-          status: t.intercepted ? 'intercepted' : (t.isError ? 'error' : 'ok'),
-          startedAt: rec.endedAt - (t.durationMs ?? 0),
-          durationMs: t.durationMs ?? 0,
+          id: t.id,
+          runId: t.runId,
+          name: t.name,
+          args: t.args,
+          result: t.result,
+          status: t.status,
+          startedAt: t.startedAt,
+          durationMs: t.durationMs,
         })
       }
       finishRun(rec)

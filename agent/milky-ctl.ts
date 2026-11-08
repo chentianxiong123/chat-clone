@@ -1,5 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { watch, readFileSync, readdirSync, existsSync, openSync, unlinkSync, statSync, type FSWatcher } from 'node:fs'
+import { watch, readFileSync, readdirSync, existsSync, openSync, closeSync, unlinkSync, statSync, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 
 const MILKY_BIN = process.env.MILKY_BIN || '/opt/qqbot/Lagrange.Milky'
@@ -160,7 +160,7 @@ class MilkyCtl {
     let logFd: number | null = null
     try {
       // 健壮性：崩溃多次重启日志无限增长 → 超 1MB 截断（每次启动只查一次，非轮询）
-      try { if (statSync(MILKY_LOG).size > 1024 * 1024) openSync(MILKY_LOG, 'w').close() } catch { /* 日志不存在/无权限 */ }
+      try { if (statSync(MILKY_LOG).size > 1024 * 1024) closeSync(openSync(MILKY_LOG, 'w')) } catch { /* 日志不存在/无权限 */ }
       logFd = openSync(MILKY_LOG, 'a')
     } catch { /* 日志不可写时忽略 */ }
     const child = spawn(MILKY_BIN, [], {

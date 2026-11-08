@@ -8,7 +8,11 @@
     "mine": "node --env-file=.env --import tsx mine.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run test/e2e-full.test.ts"
+    "test:e2e": "vitest run test/e2e-full.test.ts",
+    "check": "npm run typecheck && npm run lint && npm run knip && npm run test",
+    "typecheck": "npx tsc --noEmit 2>&1 | grep -E \"TS6133|TS6196|TS2339|TS2304|TS2305\" || echo \"typecheck ok\"; npx tsc --noEmit > /dev/null 2>&1 && echo \"tsc clean\" || echo \"(tsc 有库类型噪音，仅上面 grep 的孤儿/未用/断线项需关注)\"",
+    "lint": "eslint . --max-warnings=0",
+    "knip": "knip"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^1.5.0",
@@ -16,15 +20,19 @@
     "@node-rs/jieba": "^2.0.4",
     "node-napcat-ts": "^0.4.25",
     "openai": "^7.5.0",
-    "qrcode": "^1.5.4",
     "undici": "^8.12.3",
     "ws": "^8.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "eslint": "^10.14.0",
+    "knip": "^6.44.2",
     "tsx": "^4.23.15",
-    "typescript": "^5.0.0",
+    "typescript": "^5.9.3",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
   },

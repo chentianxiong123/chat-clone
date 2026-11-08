@@ -1,5 +1,5 @@
 import { config, minedProfileMeta } from './config.js'
-import { loadRecentState, saveRecentState, clearRecentState } from './memory.js'
+import { loadRecentState, saveRecentState } from './memory.js'
 
 /**
  * 近期状态（全局，单群场景）

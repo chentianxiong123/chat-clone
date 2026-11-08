@@ -231,7 +231,6 @@ export function applyStyle(reply: string, bias?: StyleBias): string {
   const st = config.humanlike.style
   if (!reply.trim()) return reply
   const emojiProb = bias?.emojiProb ?? st.emojiProb
-  const fillerProb = bias?.fillerProb ?? st.fillerProb
   const typoProb = bias?.typoProb ?? st.typoProb
   const maxChars = bias?.maxChars ?? st.maxChars
   let out = reply
