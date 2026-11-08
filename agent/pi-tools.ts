@@ -9,13 +9,12 @@
  *       ② 搜到的旧记录跟当前话题关键词不重合 → 拒绝「搜到的跟现在话题不沾边，换关键词再搜」
  *       ③ 搜到相近话题                      → 放行 hooks.reply
  *   - 模型被迫"疯狂搜索"：每被拒一次就再 search 一次，直到搜到相近才许开口；搜不到就沉默。
- * 与 tools.ts（ToolSpec 版）并存，v2 换 pi 内核后使用本文件；v1 删除后 tools.ts 可清。
  */
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { config } from './config.js'
 import { searchMemoryNote, searchMemoryNoteBatch, createMemoryExecutors } from './tools.js'
 
-/** 把 ToolSpec 风格参数 + execute 组装成 pi AgentTool */
+/** 把参数 + execute 组装成 pi AgentTool */
 function makeTool(
   name: string,
   description: string,

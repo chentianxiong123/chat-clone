@@ -189,16 +189,6 @@ export function buildProfileFromStats(stats: MinedStats): HumanlikeProfileOverri
   }
 }
 
-/** 按对话状态取回复概率（elapsedMs=距上次本人发言；fallback=state 关闭时用） */
-export function stateReplyProb(elapsedMs: number, fallback: number): number {
-  const st = config.humanlike.replyProb.state
-  if (!st.enabled) return fallback
-  if (elapsedMs <= st.activeWithinMs) return st.active
-  if (elapsedMs <= st.semiWithinMs) return st.semi
-  if (elapsedMs <= st.coldWithinMs) return st.cold
-  return st.veryCold
-}
-
 /** 按经验分布采样一次反应延迟（毫秒），无分布时退回均匀 min~max */
 export function sampleReactMs(): number {
   const r = config.humanlike.react
@@ -218,31 +208,6 @@ export function sampleReactMs(): number {
     prev = Math.max(prev, d.upToMs)
   }
   return Math.round(r.maxMs)
-}
-
-/** 超长单条在标点/空格处再拆，避免一条发一大段（按码点，不会切坏 emoji） */
-export function splitLongSegment(line: string, maxChars: number): string[] {
-  if (maxChars <= 0) return [line]
-  const chars = [...line]
-  if (chars.length <= maxChars) return [line]
-  const out: string[] = []
-  let start = 0
-  while (start < chars.length) {
-    let end = Math.min(start + maxChars, chars.length)
-    if (end < chars.length) {
-      // 回退到窗口内最后一个标点/空格，尽量不切在词中间
-      for (let i = end - 1; i > start + Math.floor(maxChars / 2); i--) {
-        if (/[，。！？、；：,.!?;:\s]/.test(chars[i])) {
-          end = i + 1
-          break
-        }
-      }
-    }
-    const seg = chars.slice(start, end).join('').trim()
-    if (seg) out.push(seg)
-    start = end
-  }
-  return out.length ? out : [line]
 }
 
 // ── 工具 ────────────────────────────────────────────────────────────────────

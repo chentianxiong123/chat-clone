@@ -19,15 +19,6 @@ function priceFor(p: ProviderSpec): { in: number; out: number } {
   }
 }
 
-/** 按 provider 价格表计算一次调用的费用（元） */
-export function calcLlmCost(tokensIn: number, tokensOut: number): number {
-  const active = getActiveProvider()
-  if (!active) return 0
-  const price = priceFor(active)
-  if (!price.in && !price.out) return 0
-  return (tokensIn / 1_000_000) * price.in + (tokensOut / 1_000_000) * price.out
-}
-
 export interface LlmResult {
   text: string
   providerId: string
@@ -114,11 +105,7 @@ export async function callLlm(messages: ChatMessage[]): Promise<string> {
   return text
 }
 
-// ── Function call 工具（类型仅保留，供 tools.ts/pi-tools.ts 组装；实际 loop 走 pi-agent）──
-export interface ToolSpec {
-  type: 'function'
-  function: { name: string; description: string; parameters: Record<string, unknown> }
-}
+// ── Function call 工具（类型仅保留，供 pi-tools.ts 组装；实际 loop 走 pi-agent）──
 export type ToolExecutor = (args: Record<string, unknown>) => Promise<string> | string
 
 /** 直接调用（WebUI 手测 LLM 用），返回完整响应或错误信息 */

@@ -106,14 +106,6 @@ export function saveDialog(key: string, dialog: ChatMessage[], summary: string):
   }
 }
 
-export function clearDialogDb(key: string): void {
-  const db = openDb()
-  if (!db) return
-  try {
-    db.prepare(`DELETE FROM scene_dialog WHERE scene_key = ?`).run(key)
-  } catch { /* ignore */ }
-}
-
 /** 清空整张 scene_dialog 表（全部场景历史）。clearDialog(undefined) 用它，避免只清内存漏了 DB 残留。 */
 export function clearDialogDbAll(): void {
   const db = openDb()
@@ -139,16 +131,6 @@ export function listSceneSummaries(): Array<{ key: string; summary: string; upda
       updatedAt: r.updated_at,
       dialogLen: (JSON.parse(r.dialog_json) as unknown[]).length,
     }))
-  } catch {
-    return []
-  }
-}
-
-export function listSceneKeys(): string[] {
-  const db = openDb()
-  if (!db) return []
-  try {
-    return (db.prepare(`SELECT scene_key FROM scene_dialog`).all() as Array<{ scene_key: string }>).map(r => r.scene_key)
   } catch {
     return []
   }
