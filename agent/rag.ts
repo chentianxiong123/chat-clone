@@ -306,12 +306,19 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
     : [...topPool].sort(() => Math.random() - 0.5).slice(0, MAX_CHUNKS)
   let total = 0
   const lines: string[] = []
+  // 模式优先级：dialogPairs（对话对片段，user+assistant 一起）> assistantOnly（只本人短句）
+  const usePairs = config.rag.dialogPairs && config.rag.assistantOnly
+  const MAX_PAIR_LINES = usePairs ? 8 : 4 // 对话对每 chunk 最多 8 行（比孤立短句多，保留完整"对方说→你回"）
   for (const r of sampled) {
     const allLines = r.text.split('\n').filter(l => /^(user|assistant):/.test(l)).map(l => l.trim()).filter(Boolean)
     // ① 本人短句化：只保留 assistant 行（本人真实反应，味道最纯）
     let asstLines: string[]
     let userCtx: string[] = []
-    if (config.rag.assistantOnly) {
+    if (usePairs) {
+      // 对话对模式：user+assistant 都保留，但选最贴 query 的片段（按行相关度排序，取 top 段）
+      // 两人风格很像 → 把"对方说→你回"的完整片段喂 LLM，比孤立短句自然
+      asstLines = allLines.map(l => l.replace(/^(user|assistant):\s*/, (m, p) => (p === 'user' ? '对方：' : '你：'))).slice(0, MAX_PAIR_LINES)
+    } else if (config.rag.assistantOnly) {
       asstLines = allLines.filter(l => l.startsWith('assistant:')).map(l => l.replace(/^assistant:\s*/, '').trim())
       // ①B 可选：保留 ≤2 句最相关 user 作语境（模型知道"遇到啥情况→这么回"）
       if (config.rag.keepUserContext) {
@@ -322,11 +329,11 @@ export async function searchRag(query: string, modeOverride?: string): Promise<s
       // 未开 assistantOnly：保持原"完整对话对"（user+assistant）
       asstLines = allLines.map(l => l).slice(0, 6)
     }
-    if (config.rag.assistantOnly) {
+    if (config.rag.assistantOnly && !usePairs) {
       // ③ 本人短句按相关度排序（最贴 query 的优先）
       asstLines = asstLines.filter(t => t).sort((a, b) => relevanceOf(b) - relevanceOf(a))
     }
-    const chosen = config.rag.assistantOnly
+    const chosen = (config.rag.assistantOnly && !usePairs)
       ? [...userCtx, ...asstLines.slice(0, 4)] // 语境（若开）+ 本人短句 top4
       : asstLines
     if (!chosen.length) continue

@@ -119,6 +119,10 @@ export const config = {
     // ── 召回质量开关（提升喂给模型的片段质量，A/B 可切）─────────────────
     // ① 只取本人（assistant）短句，丢 user 噪音：模型只看"本人当年怎么说"，不被杂聊带偏
     assistantOnly: process.env.RAG_ASSISTANT_ONLY !== 'false',
+    // 保留对话对片段（user+assistant 一起，一小段）：两人说话风格很像，
+    // 把"对方说→你回"的完整片段喂给 LLM 学味道（比只给本人孤立短句更自然）。
+    // 默认开；关掉=回退旧 assistantOnly（只喂本人短句）。
+    dialogPairs: process.env.RAG_DIALOG_PAIRS !== 'false',
     // ①B 精简 user 语境：每个 chunk 保留最相关的 ≤2 句 user 作语境（false=完全丢 user，最纯）
     keepUserContext: process.env.RAG_KEEP_USER_CONTEXT === 'true',
     // ② 相关性闸门：chunk 跟 query 关键词重合度（bigram 命中数）低于此值的不要（宁缺毋滥）
