@@ -33,15 +33,21 @@ export interface UsageSummary {
 }
 
 const DATA_DIR = join(dirname(fileURLToPath(new URL('.', import.meta.url))), 'data')
-const DB_PATH = join(DATA_DIR, 'stats.db')
+
+function resolveDbPath(): string {
+  // 惰性读：openDb 时取（STATS_DB_PATH env 可覆盖，e2e 测试指临时库；默认生产 data/stats.db）
+  return process.env.STATS_DB_PATH || join(DATA_DIR, 'stats.db')
+}
 
 let _db: DatabaseSync | null = null
+let _dbPath = ''
 
 function openDb(): DatabaseSync {
-  if (_db) return _db
+  const p = resolveDbPath()
+  if (_db && _dbPath === p) return _db
   try {
-    mkdirSync(DATA_DIR, { recursive: true })
-    const db = new DatabaseSync(DB_PATH)
+    mkdirSync(dirname(p), { recursive: true })
+    const db = new DatabaseSync(p)
     db.exec(`
       CREATE TABLE IF NOT EXISTS usage_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +81,7 @@ function openDb(): DatabaseSync {
     if (!cols.includes('ttft_ms')) db.exec(`ALTER TABLE usage_log ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0`)
     if (!cols.includes('cached_tokens')) db.exec(`ALTER TABLE usage_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
     _db = db
+    _dbPath = p
     return db
   } catch (e) {
     console.warn('[Stats] 打开 stats.db 失败（统计禁用）:', (e as Error).message)
