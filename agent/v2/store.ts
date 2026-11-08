@@ -212,7 +212,9 @@ function seedFromMemory(): void {
 
 export function appendEvent(ev: V2Event): void {
   const db = openDb()
-  const thread = 'thread' in ev ? ev.thread : null
+  // thread 可能 undefined（旧事件/部分调用）→ 归一成 string，绑定 undefined/null 到 SQLite 会报
+  // "Provided value cannot be bound to SQLite parameter 3"
+  const thread: string = ('thread' in ev && typeof ev.thread === 'string') ? ev.thread : ''
   db.prepare(`INSERT INTO events(ts, type, thread_id, payload) VALUES (?, ?, ?, ?)`)
     .run(ev.at ?? Date.now(), ev.type, thread, JSON.stringify(ev))
 }

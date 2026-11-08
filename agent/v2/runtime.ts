@@ -209,16 +209,20 @@ export class AgentRuntime {
       rec.tokensOut = tokensOut
       rec.cost = cost
       // 工具流水写 tool_calls 表（双视图 LLM 视角数据源，之前 addToolTrace 全仓无人调=空壳）
-      for (const t of lastToolLog) {
+      // 注意：lastToolLog 是 PiToolNode（name/resultText/intercepted/isError/durationMs），
+      // 之前误用 t.tool/t.note/t.ms 全 undefined → result NOT NULL 崩 → finally 中途死，
+      // finishRun/recordUsage 没执行（runs 永远 running、usage_log 不更新）
+      for (let i = 0; i < lastToolLog.length; i++) {
+        const t = lastToolLog[i]
         addToolTrace({
-          id: t.id,
+          id: `${runId}_t${i}`,
           runId,
-          name: t.tool,
-          args: t.args,
-          result: t.note,
-          status: 'ok',
-          startedAt: rec.endedAt - (t.ms ?? 0),
-          durationMs: t.ms ?? 0,
+          name: t.name ?? 'unknown',
+          args: t.args ?? {},
+          result: t.resultText ?? '',
+          status: t.intercepted ? 'intercepted' : (t.isError ? 'error' : 'ok'),
+          startedAt: rec.endedAt - (t.durationMs ?? 0),
+          durationMs: t.durationMs ?? 0,
         })
       }
       finishRun(rec)
